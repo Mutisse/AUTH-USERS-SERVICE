@@ -1,0 +1,17 @@
+user-service/
+├── src/
+│   ├── app.ts
+│   ├── server.ts
+│   ├── config/
+│   │   └── database.ts
+│   ├── models/
+│   │   └── user.model.ts
+│   ├── controllers/
+│   │   └── user.controller.ts
+│   ├── routes/
+│   │   └── user.routes.ts
+│   └── utils/
+│       └── logger.ts
+├── .env
+├── tsconfig.json
+├── package.json
