@@ -3,7 +3,7 @@ import cors from "cors";
 import userRoutes from "./routes/user.routes";
 import chalk from "chalk";
 import { requestLogger } from "./middlewares/request-logger.middleware";
-import { errorHandler, notFoundHandler } from "../src/middlewares/errorHandler";
+import { errorHandler, notFoundHandler } from "./middlewares/errorHandler";
 
 const app = express();
 
