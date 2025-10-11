@@ -1,17 +1,116 @@
-user-service/
-├── src/
-│   ├── app.ts
-│   ├── server.ts
-│   ├── config/
-│   │   └── database.ts
-│   ├── models/
-│   │   └── user.model.ts
-│   ├── controllers/
-│   │   └── user.controller.ts
-│   ├── routes/
-│   │   └── user.routes.ts
-│   └── utils/
-│       └── logger.ts
-├── .env
-├── tsconfig.json
-├── package.json
+src/
+├── models/
+│   ├── user/
+│   │   ├── base/
+│   │   │   └── UserBase.model.ts          # Campos comuns a todos
+│   │   ├── client/
+│   │   │   ├── Client.model.ts            # Campos específicos do CLIENT
+│   │   │   └── Client.interface.ts
+│   │   ├── employee/
+│   │   │   ├── Employee.model.ts          # Campos específicos do EMPLOYEE  
+│   │   │   └── Employee.interface.ts
+│   │   └── admin/
+│   │       ├── Admin.model.ts             # Campos específicos do ADMIN
+│   │       └── Admin.interface.ts
+│   └── interfaces/
+│       └── user.roles.ts                  # Enums e tipos comuns
+├── services/
+│   ├── auth/
+│   │   ├── Auth.service.ts                # Autenticação geral
+│   │   ├── client/
+│   │   │   └── ClientAuth.service.ts      # Auth específica do cliente
+│   │   ├── employee/
+│   │   │   └── EmployeeAuth.service.ts    # Auth específica do employee
+│   │   └── admin/
+│   │       └── AdminAuth.service.ts       # Auth específica do admin
+│   └── user/
+│       ├── client/
+│       │   └── Client.service.ts          # Lógica específica do cliente
+│       ├── employee/
+│       │   └── Employee.service.ts        # Lógica específica do employee
+│       └── admin/
+│           └── Admin.service.ts           # Lógica específica do admin
+├── controllers/
+│   ├── auth/
+│   │   ├── Auth.controller.ts             # Controller geral de auth
+│   │   ├── client/
+│   │   │   └── ClientAuth.controller.ts   # Controller auth cliente
+│   │   ├── employee/
+│   │   │   └── EmployeeAuth.controller.ts # Controller auth employee
+│   │   └── admin/
+│   │       └── AdminAuth.controller.ts    # Controller auth admin
+│   └── user/
+│       ├── client/
+│       │   └── Client.controller.ts       # Controller cliente
+│       ├── employee/
+│       │   └── Employee.controller.ts     # Controller employee  
+│       └── admin/
+│           └── Admin.controller.ts        # Controller admin
+└── routes/
+    ├── auth/
+    │   ├── auth.routes.ts                 # Rotas gerais de auth
+    │   ├── client/
+    │   │   └── client.auth.routes.ts      # Rotas auth cliente
+    │   ├── employee/
+    │   │   └── employee.auth.routes.ts    # Rotas auth employee
+    │   └── admin/
+    │       └── admin.auth.routes.ts       # Rotas auth admin
+    └── user/
+        ├── client/
+        │   └── client.routes.ts           # Rotas cliente
+        ├── employee/
+        │   └── employee.routes.ts         # Rotas employee
+        └── admin/
+            └── admin.routes.ts            # Rotas admin
+
+
+ SISTEMA BEAUTYTIME
+│
+├── 👥 **NÍVEL 1: CLIENTES** (Consumidores)
+│   ├── 👑 **Acesso:** Básico
+│   ├── 🎯 **Funções:**
+│   │   ├── Agendar serviços
+│   │   ├── Ver histórico
+│   │   ├── Acumular pontos fidelidade
+│   │   ├── Avaliar funcionários
+│   │   └── Gerenciar perfil
+│   └── 🔐 **Permissões:** Próprios dados
+│
+├── 💼 **NÍVEL 2: FUNCIONÁRIOS** (Prestadores de serviço)
+│   │
+│   ├── 👨‍💼 **SUB-NÍVEL 2.1: STAFF** (Cabeleireiros/Esteticistas)
+│   │   ├── 👑 Acesso: Operacional
+│   │   ├── 🎯 Funções:
+│   │   │   ├── Ver própria agenda
+│   │   │   ├── Registrar atendimentos
+│   │   │   ├── Gerenciar disponibilidade
+│   │   │   └── Receber avaliações
+│   │   └── 🔐 Permissões: Próprios dados + clientes atendidos
+│   │
+│   ├── 👔 **SUB-NÍVEL 2.2: GERENTE** (Manager)
+│   │   ├── 👑 Acesso: Gerencial
+│   │   ├── 🎯 Funções:
+│   │   │   ├── Gerenciar equipe
+│   │   │   ├── Visualizar todas agendas
+│   │   │   ├── Relatórios de performance
+│   │   │   └── Aprovar folgas
+│   │   └── 🔐 Permissões: Todos funcionários do salão
+│   │
+│   └── 👑 **SUB-NÍVEL 2.3: PROPRIETÁRIO** (Salon Owner)
+│       ├── 👑 Acesso: Administrativo
+│       ├── 🎯 Funções:
+│       │   ├── Contratar/demitir
+│       │   ├── Configurar salão
+│       │   ├── Acesso financeiro
+│       │   └── Todas permissões gerente
+│       └── 🔐 Permissões: Salão completo
+│
+└── ⚙️ **NÍVEL 3: ADMINISTRADORES** (Sistema)
+    ├── 👑 **Acesso:** Master
+    ├── 🎯 **Funções:**
+    │   ├── Gerenciar todos usuários
+    │   ├── Configurações do sistema
+    │   ├── Backup e manutenção
+    │   ├── Suporte técnico
+    │   └── Relatórios globais
+    └── 🔐 **Permissões:** Sistema completo           

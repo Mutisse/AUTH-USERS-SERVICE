@@ -1,175 +1,99 @@
-/**
- * Tipos e interfaces completos para gestão de usuários
- */
+// Enums para roles e status
 export enum UserMainRole {
   CLIENT = "client",
-  EMPLOYEE = "employee",
-  ADMINSYSTEM = "admin_system",
+  EMPLOYEE = "employee", 
+  ADMINSYSTEM = "admin_system"
 }
 
 export enum EmployeeSubRole {
   SALON_OWNER = "salon_owner",
-  MANAGER = "salon_manager",
-  STAFF = "salon_staff",
-}
-
-export enum Gender {
-  MALE = "male",
-  FEMALE = "female",
-  OTHER = "other",
-  PREFER_NOT_TO_SAY = "prefer_not_to_say",
+  MANAGER = "manager",
+  STAFF = "staff",
+  RECEPTIONIST = "receptionist"
 }
 
 export enum UserStatus {
   ACTIVE = "active",
   INACTIVE = "inactive",
   SUSPENDED = "suspended",
-  PENDING = "pending",
-  PENDING_VERIFICATION = "pending_verification",
+  PENDING = "pending"
 }
 
-export enum DocumentType {
-  BI = "BI",
-  PASSPORT = "passport",
-  DIRE = "DIRE",
-  DRIVERS_LICENSE = "drivers_license",
-  OTHER = "other",
-}
+export type Role = UserMainRole | `${UserMainRole.EMPLOYEE}:${EmployeeSubRole}`;
 
-export type Role =
-  | UserMainRole.CLIENT
-  | UserMainRole.ADMINSYSTEM
-  | `${UserMainRole.EMPLOYEE}_${EmployeeSubRole}`;
-
+// Interfaces principais
 export interface Name {
   firstName: string;
   lastName: string;
-  display?: string;
-}
-
-export interface Identification {
-  documentType?: DocumentType;
-  documentNumber?: string;
-  issueDate?: Date;
-  expiryDate?: Date;
-  issuingAuthority?: string;
-  documentPhoto?: string;
-  isExpired?: boolean;
+  display: string;
 }
 
 export interface Address {
-  country?: string;
-  province?: string;
-  city?: string;
-  district?: string;
   street?: string;
-  houseNumber?: string;
-  complement?: string;
-  postalCode?: string;
-  coordinates?: {
-    lat: number;
-    lng: number;
-  };
+  city?: string;
+  state?: string;
+  zipCode?: string;
+  country?: string;
 }
 
 export interface UserPreferences {
-  theme?: string;
-  notifications?: {
+  theme: 'light' | 'dark' | 'auto';
+  notifications: {
     email: boolean;
     push: boolean;
     sms: boolean;
     whatsapp: boolean;
   };
-  language?: string;
-  timezone?: string;
-  accessibility?: {
+  language: string;
+  timezone: string;
+  accessibility: {
     highContrast: boolean;
     fontSize: number;
     screenReader: boolean;
   };
 }
 
-export interface SessionUser {
-  id: string;
-  email: string;
-  role: Role;
-  subRole?: EmployeeSubRole;
-  isVerified: boolean;
-  isActive: boolean;
-  status: UserStatus;
-  fullName: Name;
-  profileImage?: string;
-  lastLogin?: Date;
-  requiresPasswordChange: boolean;
-  password?: string; // Adicionado para validação
+export interface Verification {
+  email: boolean;
+  phone: boolean;
+  emailToken?: string;
+  phoneToken?: string;
+  verifiedAt?: Date;
 }
 
-export interface CompleteUser extends SessionUser {
-  preferences: UserPreferences;
-  phoneNumber?: string;
-  birthDate?: Date;
-  gender?: Gender;
-  address?: Address;
-  verification: {
-    email: boolean;
-    phone: boolean;
-  };
-  createdAt: Date;
-  updatedAt: Date;
-  isOnline?: boolean;
+export interface PasswordHistory {
+  password: string;
+  changedAt: Date;
 }
 
-export interface VerificationResponse {
-  verified: boolean;
-  method: "email" | "phone" | "identity";
-  verifiedAt: Date;
-  nextVerificationStep?: "phone" | "identity";
-}
-
-export interface UserWithRelations extends CompleteUser {
-  ownedSalons?: string[];
-  managedSalons?: string[];
-  favoriteSalons?: string[];
-}
-
-// interfaces.user.ts - Atualize a interface
+// DTOs para criação e atualização
 export interface CreateUserDto {
-  fullName: Name;
   email: string;
   password: string;
-  role: Role;
-  subRole?: EmployeeSubRole;
-  gender?: Gender;
+  role: string;
+  fullName: Name | string;
+  phoneNumber?: string;
   birthDate?: Date;
-  phoneNumber?: string; // ✅ ADICIONE ESTE CAMPO
-  address?: Omit<Address, "coordinates">;
-  identification?: Omit<Identification, "isExpired">;
-  sendWelcomeEmail?: boolean;
-  isActive?: boolean;
+  gender?: string;
+  address?: Address;
   status?: UserStatus;
-  preferences?: UserPreferences;
-  captchaToken?: string;
-  acceptTerms?: boolean; // ✅ ADICIONE SE NECESSÁRIO
+  isActive?: boolean;
+  subRole?: string;
+  originalRole?: string;
 }
 
 export interface UpdateUserDto {
-  fullName?: Partial<Name>;
   email?: string;
-  role?: Role;
-  subRole?: EmployeeSubRole | null;
-  gender?: Gender;
-  birthDate?: Date | null;
-  phoneNumber?: string | null;
-  profileImage?: string | null;
-  address?: Address | null;
-  identification?: Partial<Identification>;
-  preferences?: UserPreferences;
-  timezone?: string;
-  locale?: string;
-  isActive?: boolean;
-  isVerified?: boolean;
+  fullName?: Name;
+  phoneNumber?: string;
+  birthDate?: Date;
+  gender?: string;
+  address?: Address;
   status?: UserStatus;
-  metadata?: Record<string, any>;
+  isActive?: boolean;
+  role?: string;
+  subRole?: string;
+  preferences?: Partial<UserPreferences>;
 }
 
 export interface LoginDto {
@@ -177,55 +101,88 @@ export interface LoginDto {
   password: string;
 }
 
-export interface PasswordResetDto {
-  token: string;
-  newPassword: string;
-  confirmPassword: string;
-}
-
 export interface EmailVerificationDto {
   token: string;
   email: string;
 }
 
+// Interfaces de resposta
+export interface SessionUser {
+  id: string;
+  email: string;
+  role: Role;
+  subRole?: string | null;
+  isVerified: boolean;
+  isActive: boolean;
+  status: UserStatus;
+  fullName: Name;
+  profileImage?: string;
+  lastLogin?: Date;
+  requiresPasswordChange: boolean;
+}
+
+export interface CompleteUser extends SessionUser {
+  preferences: UserPreferences;
+  phoneNumber?: string;
+  birthDate?: Date;
+  gender?: string;
+  address?: Address;
+  verification: {
+    email: boolean;
+    phone: boolean;
+  };
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface VerificationResponse {
+  verified: boolean;
+  method: 'email' | 'phone';
+  verifiedAt: Date;
+  nextVerificationStep?: 'phone' | 'email';
+}
+
+// Interface do documento do MongoDB
+export interface UserDocument {
+  _id: string;
+  email: string;
+  password: string;
+  role: string;
+  subRole?: string | null;
+  fullName: Name;
+  phoneNumber?: string;
+  birthDate?: Date;
+  gender?: string;
+  address?: Address;
+  profileImage?: string;
+  status: UserStatus;
+  isActive: boolean;
+  isVerified: boolean;
+  isOnline?: boolean;
+  preferences: UserPreferences;
+  verification: Verification;
+  lastLogin?: Date;
+  lastActivity?: Date;
+  loginCount: number;
+  failedLoginAttempts: number;
+  lastLoginAttempt?: Date;
+  requiresPasswordChange: boolean;
+  passwordHistory: PasswordHistory[];
+  verificationToken?: string;
+  verificationExpires?: Date;
+  passwordResetToken?: string;
+  passwordResetExpires?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Interface de resposta genérica
 export interface UserResponse<T = any> {
   success: boolean;
   data?: T;
   error?: string;
   code?: string;
-  statusCode?: number;
-  details?: any;
+  statusCode: number;
   message?: string;
-}
-
-export interface UserDocument extends Omit<CompleteUser, "id"> {
-  _id: string;
-  password: string;
-  passwordResetToken?: string;
-  passwordResetExpires?: Date;
-  verificationToken?: string;
-  verificationExpires?: Date;
-  twoFactorSecret?: string;
-  failedLoginAttempts?: number;
-  lastLoginAttempt?: Date;
-  lastActivity?: Date;
-  loginCount?: number;
-  requiresPasswordChange?: boolean;
-  passwordHistory?: {
-    password: string;
-    changedAt: Date;
-  }[];
-  activityLog?: Array<{
-    action: string;
-    timestamp: Date;
-    ipAddress: string;
-    device: string;
-    location?: {
-      city?: string;
-      country?: string;
-    };
-  }>;
-  deleted?: boolean;
-  deletedAt?: Date | null;
-  __v?: number;
+  details?: any;
 }

@@ -1,75 +1,158 @@
-import 'dotenv/config'
-import app from './app'
-import { connectDB, disconnectDB } from './config/database'
-import chalk from 'chalk'
+import "dotenv/config";
+import app from "./app";
+import chalk from "chalk";
+import databaseManager from "./config/database";
 
-const PORT = process.env.PORT || 3001
-let server: ReturnType<typeof app.listen> | null = null
+const PORT = process.env.PORT || 3001;
+
+let server: ReturnType<typeof app.listen> | null = null;
+
+// 🎯 CORES PADRONIZADAS COM O GATEWAY
+const colors = {
+  success: chalk.green,
+  info: chalk.blue,
+  warning: chalk.yellow,
+  error: chalk.red,
+  debug: chalk.magenta,
+  gray: chalk.gray,
+  cyan: chalk.cyan,
+};
+
 
 function logStartupInfo() {
-  console.log(chalk.green.bold(`[${new Date().toISOString()}] 🚀 Iniciando User Service...`))
-  console.log(chalk.blue(`   → Porta: ${PORT}`))
-  console.log(chalk.blue(`   → Ambiente: ${process.env.NODE_ENV || 'development'}`))
-  console.log(chalk.blue(`   → URL: http://localhost:${PORT}`))
-  console.log(chalk.blue(`   → PID: ${process.pid}`))
+  console.log(
+    colors.success.bold(
+      `\n✨ [${new Date().toISOString()}] Iniciando User Service`
+    )
+  );
+  console.log(colors.info(`   📍 Porta: ${PORT}`));
+  console.log(
+    colors.info(`   🌿 Ambiente: ${process.env.NODE_ENV || "development"}`)
+  );
+  console.log(colors.info(`   🔗 URL: http://localhost:${PORT}`));
+  console.log(colors.info(`   🆔 PID: ${process.pid}`));
+  console.log(colors.info(`   🛠️  Serviços: Authentication + User Management`));
 }
 
-async function start() {
+async function startServer() {
   try {
-    logStartupInfo()
-    await connectDB()
-    
+    logStartupInfo();
+
+    // 1. ✅ CONEXÃO COM MONGODB
+    console.log(colors.debug("🗄️  Conectando ao MongoDB..."));
+    await databaseManager.connectDB();
+
+    const dbStatus = databaseManager.getConnectionStatus();
+    console.log(colors.success("🗄️  ✅ MongoDB conectado - User Service"));
+
+    // 2. INICIA SERVIDOR HTTP
     server = app.listen(PORT, () => {
-      console.log(chalk.green.bold(`[${new Date().toISOString()}] 🏁 User Service pronto e aceitando conexões`))
-    })
-    
-    attachErrorHandlers()
+      console.log(
+        colors.success.bold(
+          `\n🎉 [${new Date().toISOString()}] User Service pronto!`
+        )
+      );
+      console.log(
+        colors.cyan(`   ❤️  Health: http://localhost:${PORT}/health`)
+      );
+      console.log(colors.cyan(`   🔐 Auth: http://localhost:${PORT}/api/auth`));
+      console.log(
+        colors.cyan(`   👥 Users: http://localhost:${PORT}/api/users`)
+      );
+      console.log(
+        colors.gray(`   ⏰ Iniciado em: ${new Date().toLocaleString("pt-BR")}`)
+      );
+    });
+
+    attachErrorHandlers();
   } catch (error) {
-    console.error(chalk.red.bold(`[${new Date().toISOString()}] ❌ Falha crítica durante a inicialização`))
-    console.error(chalk.red(`   → Erro: ${error instanceof Error ? error.message : 'Erro desconhecido'}`))
-    process.exit(1)
+    console.error(
+      colors.error.bold(
+        `\n💥 [${new Date().toISOString()}] Falha na inicialização`
+      )
+    );
+    console.error(
+      colors.error(
+        `   📋 Erro: ${
+          error instanceof Error ? error.message : "Erro desconhecido"
+        }`
+      )
+    );
+    process.exit(1);
   }
 }
 
-function shutdown(callback?: () => void) {
+async function gracefulShutdown(signal: string, callback?: () => void) {
+  console.log(
+    colors.warning(
+      `\n🔄 [${new Date().toISOString()}] Recebido ${signal}, encerrando...`
+    )
+  );
+
   if (!server) {
-    console.log(chalk.yellow(`[${new Date().toISOString()}] ⚠️ Servidor já está parado`))
-    callback?.()
-    return
+    console.log(
+      colors.warning(`[${new Date().toISOString()}] ⚠️  Servidor já parado`)
+    );
+    callback?.();
+    return;
   }
 
-  console.log(chalk.yellow(`[${new Date().toISOString()}] 🛑 Iniciando desligamento gracioso...`))
-  
-  server.close(async () => {
-    console.log(chalk.yellow(`[${new Date().toISOString()}] 🛑 Servidor HTTP finalizado`))
-    try {
-      await disconnectDB()
-      console.log(chalk.green(`[${new Date().toISOString()}] 📦 Todos os recursos liberados com sucesso`))
-    } catch (error) {
-      console.error(chalk.red(`[${new Date().toISOString()}] ❌ Erro durante a liberação de recursos`))
-      console.error(chalk.red(`   → Erro: ${error instanceof Error ? error.message : 'Erro desconhecido'}`))
-    }
-    server = null
-    callback?.()
-  })
+  try {
+    server.close(async () => {
+      console.log(
+        colors.info(`[${new Date().toISOString()}] 🛑 Servidor finalizado`)
+      );
+
+      await databaseManager.disconnectDB();
+      console.log(
+        colors.info(`[${new Date().toISOString()}] 📦 MongoDB desconectado`)
+      );
+
+      server = null;
+      console.log(
+        colors.success(`[${new Date().toISOString()}] ✅ Recursos liberados`)
+      );
+      callback?.();
+    });
+
+    setTimeout(() => {
+      console.error(
+        colors.error(`[${new Date().toISOString()}] ⏰ Timeout no desligamento`)
+      );
+      process.exit(1);
+    }, 10000);
+  } catch (error) {
+    console.error(
+      colors.error(`[${new Date().toISOString()}] ❌ Erro no desligamento`)
+    );
+    process.exit(1);
+  }
 }
 
 function attachErrorHandlers() {
-  process.on('SIGINT', () => shutdown(() => process.exit(0)))
-  process.on('SIGTERM', () => shutdown(() => process.exit(0)))
-  
-  process.on('uncaughtException', (err) => {
-    console.error(chalk.red.bold(`[${new Date().toISOString()}] 💥 Erro não capturado`))
-    console.error(chalk.red(`   → Erro: ${err.message}`))
-    console.error(chalk.red(`   → Stack: ${err.stack}`))
-    shutdown(() => process.exit(1))
-  })
-  
-  process.on('unhandledRejection', (reason, promise) => {
-    console.error(chalk.red.bold(`[${new Date().toISOString()}] 🔥 Promessa rejeitada sem tratamento`))
-    console.error(chalk.red(`   → Razão: ${reason instanceof Error ? reason.message : JSON.stringify(reason)}`))
-    console.error(chalk.red(`   → Promessa: ${promise}`))
-  })
+  process.on("SIGINT", () => gracefulShutdown("SIGINT", () => process.exit(0)));
+  process.on("SIGTERM", () =>
+    gracefulShutdown("SIGTERM", () => process.exit(0))
+  );
+
+  process.on("uncaughtException", (err) => {
+    console.error(
+      colors.error.bold(`\n🚨 [${new Date().toISOString()}] Erro não capturado`)
+    );
+    console.error(colors.error(`   📝 ${err.message}`));
+    gracefulShutdown("uncaughtException", () => process.exit(1));
+  });
+
+  process.on("unhandledRejection", (reason, promise) => {
+    console.error(
+      colors.error.bold(
+        `\n⚠️  [${new Date().toISOString()}] Promessa rejeitada`
+      )
+    );
+  });
 }
 
-start()
+// Inicia o servidor
+startServer();
+
+export { gracefulShutdown };

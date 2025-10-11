@@ -1,85 +1,151 @@
 import express from "express";
 import cors from "cors";
-import userRoutes from "./routes/user.routes";
-import chalk from "chalk";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import { requestLogger } from "./middlewares/request-logger.middleware";
-import { errorHandler, notFoundHandler } from "./middlewares/errorHandler";
+import apiRoutes from "./routes/index";
+import chalk from "chalk";
+import { AppError } from "./utils/AppError";
+import databaseManager from "./config/database";
+import { handleError, notFoundHandler } from './middlewares/error.middleware';
+// No final do arquivo, ANTES de app.listen:
 
 const app = express();
 
-// Middleware para logging de requisições
-app.use((req, res, next) => {
-  const startTime = Date.now();
+// 🎯 CORES PADRONIZADAS COM O GATEWAY
+const colors = {
+  success: chalk.green,
+  info: chalk.blue,
+  warning: chalk.yellow,
+  error: chalk.red,
+  debug: chalk.magenta,
+  gray: chalk.gray,
+  cyan: chalk.cyan,
+};
 
-  res.on("finish", () => {
-    const duration = Date.now() - startTime;
-    const statusColor = res.statusCode >= 400 ? chalk.red : chalk.green;
-    console.log(
-      chalk.blue(`[${new Date().toISOString()}]`),
-      chalk.bold(`${req.method} ${req.originalUrl}`),
-      statusColor(`→ ${res.statusCode}`),
-      chalk.yellow(`(${duration}ms)`)
+// 1. Configuração de proxy
+app.set("trust proxy", process.env.NODE_ENV === "production");
+
+// 2. Middlewares essenciais
+app.use(helmet());
+app.use(express.json({ limit: "10mb" }));
+
+// 3. ✅ CORS APENAS PARA GATEWAY
+const allowedOrigins = [
+  "http://localhost:8080", // Gateway
+  "http://localhost:9000", // Frontend
+];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      console.log(
+        colors.error(`🚫 User Service: Origem bloqueada - ${origin}`)
+      );
+      callback(new AppError("Acesso permitido apenas através do gateway", 403));
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+      "x-request-id",
+      "X-Service-Name",
+      "X-Forwarded-For",
+      "Accept",
+      "Origin",
+    ],
+    exposedHeaders: ["Authorization", "X-Refresh-Token"],
+  })
+);
+
+// 4. ✅ RATE LIMITING
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: process.env.NODE_ENV === "development" ? 1000 : 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.path === "/health" || req.path === "/api/health",
+  handler: (req, res) => {
+    throw new AppError(
+      "Muitas requisições. Tente novamente em 15 minutos.",
+      429
     );
-  });
+  },
+});
+app.use(limiter);
 
+// 5. ✅ CONEXÃO MONGODB
+app.use(async (req, res, next) => {
+  try {
+    await databaseManager.connectDB();
+    next();
+  } catch (error) {
+    console.error(colors.error("🗄️ Erro MongoDB:"), error);
+    next(new AppError("Banco de dados indisponível", 503));
+  }
+});
+
+// 6. ✅ LOGGING MELHORADO
+app.use((req, res, next) => {
+  const origin = req.headers.origin || "no-origin";
+  console.log(
+    colors.info(`[${new Date().toISOString()}] ${req.method} ${req.path}`),
+    colors.gray(`Origem: ${origin}`)
+  );
   next();
 });
 
-app.use(cors());
-app.use(express.json());
-
 app.use(requestLogger);
-app.use("/users", userRoutes);
-// Health Check
-app.get("/health", (req, res) => {
-  // ✅ REMOVIDOS TIPOS Problemáticos
+
+// 7. ✅ ROTAS DA API
+app.use("/api", apiRoutes);
+
+// 8. ✅ HEALTH CHECK RAIZ
+app.get("/", (req, res) => {
+  const dbStatus = databaseManager.getConnectionStatus();
+
   res.json({
-    status: "healthy",
-    timestamp: new Date().toISOString(), // ✅ CORRIGIDO - getTimestamp não existe
+    service: "beautytime-user-service",
+    status: "running",
+    version: "1.0.0",
+    timestamp: new Date().toISOString(),
+    database: {
+      status: dbStatus.isConnected ? "connected" : "disconnected",
+      host: dbStatus.host,
+      database: dbStatus.database,
+    },
+    endpoints: {
+      health: "/health",
+      auth: "/api/auth",
+      users: "/api/users",
+    },
   });
 });
 
-// Tratamento de 404
-app.use(notFoundHandler);
+app.get("/health", (req, res) => {
+  const dbStatus = databaseManager.getConnectionStatus();
 
-// Tratamento centralizado de erros
-app.use(errorHandler);
-
-// Middleware para rotas não encontradas
-app.use((req, res, next) => {
-  console.log(
-    chalk.yellow(
-      `[${new Date().toISOString()}] ⚠️ Rota não encontrada: ${req.method} ${
-        req.originalUrl
-      }`
-    )
-  );
-  res.status(404).json({ error: "Rota não encontrada" });
+  res.json({
+    status: "healthy",
+    service: "user-service",
+    database: {
+      connected: dbStatus.isConnected,
+      readyState: dbStatus.readyStateDescription,
+      host: dbStatus.host,
+      database: dbStatus.database,
+    },
+    memory: `${(process.memoryUsage().rss / 1024 / 1024).toFixed(2)} MB`,
+    environment: process.env.NODE_ENV || "development",
+    timestamp: new Date().toISOString(),
+  });
 });
 
-// Middleware para tratamento de erros
-app.use(
-  (
-    err: Error,
-    req: express.Request,
-    res: express.Response,
-    next: express.NextFunction
-  ) => {
-    console.error(
-      chalk.red.bold(
-        `[${new Date().toISOString()}] 🚨 Erro na rota ${req.method} ${
-          req.originalUrl
-        }`
-      )
-    );
-    console.error(chalk.red(`   → Erro: ${err.message}`));
-    console.error(chalk.red(`   → Stack: ${err.stack}`));
-
-    res.status(500).json({
-      error: "Erro interno no servidor",
-      message: err.message,
-    });
-  }
-);
-
+// 9. ✅ TRATAMENTO DE ERROS
+app.use(notFoundHandler);
+app.use(handleError);
 export default app;

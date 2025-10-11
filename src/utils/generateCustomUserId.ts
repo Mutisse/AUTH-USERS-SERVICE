@@ -1,29 +1,33 @@
-// utils/generateCustomUserId.ts - DEVE estar assim:
-import { randomBytes } from 'crypto';
-import { UserMainRole, EmployeeSubRole, Role } from '../models/interfaces/interfaces.user';
+import { UserMainRole } from "../models/interfaces/user.roles";
 
-// ✅ EXPORTAÇÃO CORRETA (default)
-export default function generateCustomUserId(role: Role): string {
-  const currentYear = new Date().getFullYear().toString().slice(-2);
-  const randomPart = randomBytes(2).toString('hex').toUpperCase();
+export default function generateCustomUserId(role: UserMainRole): string {
+  const timestamp = Date.now().toString().slice(-6);
+  const randomNumbers = Math.random().toString().slice(2, 6);
+  const randomLetters = generateMixedRandomPart();
 
-  const prefixMap: Record<string, string> = {
-    [UserMainRole.CLIENT]: 'CLI',
-    [UserMainRole.EMPLOYEE]: 'EMP',
-    [`${UserMainRole.EMPLOYEE}_${EmployeeSubRole.MANAGER}`]: 'EMP-MGR',
-    [`${UserMainRole.EMPLOYEE}_${EmployeeSubRole.STAFF}`]: 'EMP-STA',
-    [`${UserMainRole.EMPLOYEE}_${EmployeeSubRole.SALON_OWNER}`]: 'OWN'
-  };
+  let prefix = "USR";
 
-  // Verifica se é um role composto
-  if (role.includes('_') && prefixMap[role]) {
-    return `${prefixMap[role]}-${currentYear}-${randomPart}`;
+  if (role === UserMainRole.CLIENT) {
+    prefix = "CLI";
+  } else if (role === UserMainRole.EMPLOYEE) {
+    prefix = "EMP";
+  } else if (role === UserMainRole.ADMINSYSTEM) {
+    prefix = "ADM";
   }
 
-  // Fallback para roles simples ou desconhecidos
-  const prefix = prefixMap[role] || 'USR';
-  return `${prefix}-${currentYear}-${randomPart}`;
+  return `${prefix}${timestamp}${randomLetters}${randomNumbers}`;
 }
 
-// ❌ NÃO exporte assim:
-// export { generateCustomUserId }; // ISSO CAUSA O ERRO
+function generateMixedRandomPart(): string {
+  // Gera 2 letras aleatórias
+  const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  let letterPart = "";
+
+  for (let i = 0; i < 2; i++) {
+    letterPart += letters.charAt(Math.floor(Math.random() * letters.length));
+  }
+
+  return letterPart;
+}
+
+// Exemplo: "CLI429384XY5293"

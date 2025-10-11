@@ -1,16 +1,50 @@
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response, NextFunction } from "express";
+import chalk from "chalk";
 
-export function requestLogger(req: Request, res: Response, next: NextFunction) {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
-  console.log('Headers:', req.headers);
-  console.log('Body:', req.body);
-  console.log('Query:', req.query);
-  
-  const originalSend = res.send;
-  res.send = function(body) {
-    console.log(`Response (${res.statusCode}):`, body);
-    return originalSend.call(this, body);
-  };
-  
+// 🎯 CORES PADRONIZADAS COM O GATEWAY
+const colors = {
+  success: chalk.green,
+  info: chalk.blue,
+  warning: chalk.yellow,
+  error: chalk.red,
+  debug: chalk.magenta,
+  gray: chalk.gray,
+  cyan: chalk.cyan,
+};
+
+export const requestLogger = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const start = Date.now();
+
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    const method = req.method;
+    const url = req.url;
+    const status = res.statusCode;
+    const contentLength = res.get("Content-Length") || "0";
+
+    // 🎯 CORES BASEADAS NO STATUS
+    const statusColor =
+      status >= 500
+        ? colors.error
+        : status >= 400
+        ? colors.warning
+        : status >= 300
+        ? colors.cyan
+        : colors.success;
+
+    console.log(
+      colors.gray(`[${new Date().toISOString()}]`),
+      colors.info(method),
+      url,
+      statusColor(`${status}`),
+      colors.gray(`${duration}ms`),
+      colors.gray(`${contentLength}b`)
+    );
+  });
+
   next();
-}
+};

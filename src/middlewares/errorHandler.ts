@@ -1,89 +1,152 @@
-import { Request, Response, NextFunction } from 'express';
-import chalk from 'chalk';
-import { format } from 'date-fns';
+import { Request, Response, NextFunction } from "express";
+import { AppError } from "../utils/AppError";
+import chalk from "chalk";
 
-const getTimestamp = () => format(new Date(), "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
-
-class AppError extends Error {
-  constructor(
-    public message: string,
-    public statusCode: number = 500,
-    public details?: any
-  ) {
-    super(message);
-    this.name = this.constructor.name;
-    Error.captureStackTrace(this, this.constructor);
-  }
+// Interface para resposta de erro padronizada
+interface ErrorResponse {
+  error: string;
+  message: string;
+  statusCode: number;
+  timestamp: string;
+  path: string;
+  [key: string]: any; // ✅ CORREÇÃO: para propriedades adicionais
 }
 
-class DatabaseError extends AppError {
-  constructor(message: string, public query?: string) {
-    super(message, 503);
-  }
+// ✅ CORREÇÃO: Adicionar interface para AppError com propriedade details
+interface AppErrorWithDetails extends AppError {
+  details?: any;
+  code?: string;
 }
 
-class ValidationError extends AppError {
-  constructor(public fieldErrors: Record<string, string[]>) {
-    super("Validation failed", 400);
-  }
-}
-
-class AuthError extends AppError {
-  constructor(message: string = "Authentication failed") {
-    super(message, 401);
-  }
-}
-
-const errorMessages: Record<string, string> = {
-  ECONNRESET: "Conexão com o banco de dados foi reiniciada",
-  ETIMEDOUT: "Tempo de conexão com o banco de dados expirado",
-  ENOTFOUND: "Servidor de banco de dados não encontrado",
-  EACCES: "Permissão negada no banco de dados",
-  EAI_AGAIN: "Problema de DNS temporário",
-  DEFAULT: "Erro interno no servidor"
+// Middleware para rotas não encontradas
+export const notFoundHandler = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const error = new AppError(
+    `Rota não encontrada: ${req.method} ${req.originalUrl}`,
+    404
+  );
+  next(error);
 };
 
-export function errorHandler(err: Error, req: Request, res: Response, next: NextFunction) {
-  const timestamp = getTimestamp();
-  const statusCode = err instanceof AppError ? err.statusCode : 500;
-  const errorCode = (err as any).code || 'INTERNAL_ERROR';
-  
-  // Log detalhado do erro
-  console.error(chalk.red(`[${timestamp}] ERRO ${statusCode}:`));
-  console.error(chalk.red(`Mensagem: ${err.message}`));
-  console.error(chalk.red(`Tipo: ${err.name}`));
-  console.error(chalk.red(`Endpoint: ${req.method} ${req.path}`));
-  
-  if (process.env.NODE_ENV === 'development') {
-    console.error(chalk.red(`Stack: ${err.stack}`));
-    if (err instanceof DatabaseError && err.query) {
-      console.error(chalk.red(`Query: ${err.query}`));
+// Middleware centralizado de tratamento de erros
+export const errorHandler = (
+  error: Error | AppError,
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  // ✅ CORREÇÃO: Fazer type casting para AppErrorWithDetails
+  const appError = error as AppErrorWithDetails;
+
+  // Log do erro
+  console.error(chalk.red.bold(`[${new Date().toISOString()}] 🚨 Erro:`));
+  console.error(chalk.red(`   → Rota: ${req.method} ${req.originalUrl}`));
+  console.error(chalk.red(`   → IP: ${req.ip}`));
+  console.error(chalk.red(`   → Erro: ${error.message}`));
+
+  if (!(error instanceof AppError) || !(error as any).isOperational) {
+    console.error(chalk.red(`   → Stack: ${error.stack}`));
+  }
+
+  // Resposta padrão
+  let response: ErrorResponse = {
+    error: "Erro interno do servidor",
+    message: "Algo deu errado",
+    statusCode: 500,
+    timestamp: new Date().toISOString(),
+    path: req.originalUrl,
+  };
+
+  // ✅ CORREÇÃO: Usar appError com propriedades corrigidas
+  if (error instanceof AppError) {
+    response.statusCode = appError.statusCode;
+    response.error = getErrorTitle(appError.statusCode);
+    response.message = appError.message;
+
+    // ✅ CORREÇÃO: Adicionar code e details se existirem
+    if (appError.code) {
+      (response as any).code = appError.code;
+    }
+
+    if (appError.details) {
+      (response as any).details = appError.details;
+    }
+
+    // Adiciona erros de validação específicos se for ValidationErrors
+    if (error.name === "ValidationErrors" && "errors" in error) {
+      (response as any).errors = (error as any).errors;
     }
   }
 
-  // Resposta para o cliente
-  res.status(statusCode).json({
-    error: {
-      code: errorCode,
-      message: err instanceof AppError ? err.message : errorMessages[errorCode] || errorMessages.DEFAULT,
-      ...(err instanceof ValidationError && { details: err.fieldErrors }),
-      ...(process.env.NODE_ENV === 'development' && { 
-        stack: err.stack,
-        ...(err instanceof DatabaseError && { query: err.query })
-      }),
-      timestamp
-    }
-  });
-}
+  // Erros do Mongoose
+  if (error.name === "MongoError" || error.name === "MongoServerError") {
+    response.statusCode = 400;
+    response.error = "Erro de banco de dados";
+    response.message = handleMongoError(error);
+  }
 
-export function notFoundHandler(req: Request, res: Response, next: NextFunction) {
-  const err = new AppError(`Endpoint não encontrado: ${req.method} ${req.path}`, 404);
-  next(err);
-}
+  // Erros de validação do Mongoose
+  if (error.name === "ValidationError") {
+    response.statusCode = 400;
+    response.error = "Erro de validação";
+    response.message = handleMongooseValidationError(error);
+  }
 
-export {
-  AppError,
-  DatabaseError,
-  ValidationError,
-  AuthError
+  // Erros de sintaxe JSON
+  if (error.name === "SyntaxError" && "body" in error) {
+    response.statusCode = 400;
+    response.error = "JSON inválido";
+    response.message = "O corpo da requisição contém JSON malformado";
+  }
+
+  // Resposta final
+  res.status(response.statusCode).json(response);
 };
+
+// Função para obter título do erro baseado no status code
+function getErrorTitle(statusCode: number): string {
+  const titles: { [key: number]: string } = {
+    400: "Requisição inválida",
+    401: "Não autorizado",
+    403: "Acesso proibido",
+    404: "Recurso não encontrado",
+    409: "Conflito de dados",
+    429: "Muitas requisições",
+    500: "Erro interno do servidor",
+    503: "Serviço indisponível",
+  };
+
+  return titles[statusCode] || "Erro";
+}
+
+// Tratamento específico para erros do MongoDB
+function handleMongoError(error: any): string {
+  const code = error.code;
+
+  if (code === 11000) {
+    const field = Object.keys(error.keyValue || {})[0];
+    const value = error.keyValue ? error.keyValue[field] : "valor";
+    return `Já existe um registro com ${field}: ${value}`;
+  }
+
+  if (code === 121) {
+    return "Documento falhou na validação";
+  }
+
+  return "Erro no banco de dados";
+}
+
+// Tratamento específico para erros de validação do Mongoose
+function handleMongooseValidationError(error: any): string {
+  const errors = Object.values(error.errors || {});
+
+  if (errors.length > 0) {
+    const firstError = errors[0] as any;
+    return firstError.message || "Erro de validação nos campos";
+  }
+
+  return "Dados de entrada inválidos";
+}

@@ -1,63 +1,128 @@
-import mongoose from 'mongoose'
-import chalk from 'chalk'
+import mongoose, { ConnectionStates } from "mongoose";
+import chalk from "chalk";
 
-// Eventos de conexão para monitoramento
-mongoose.connection.on('connected', () => {
-  console.log(chalk.blue(`[${new Date().toISOString()}] 📊 Conexão MongoDB estabelecida`))
-})
+// 🎯 CORES PADRONIZADAS COM O GATEWAY
+const colors = {
+  success: chalk.green,
+  info: chalk.blue,
+  warning: chalk.yellow,
+  error: chalk.red,
+  debug: chalk.magenta,
+  gray: chalk.gray,
+  cyan: chalk.cyan,
+  white:chalk.white
+};
 
-mongoose.connection.on('disconnected', () => {
-  console.log(chalk.yellow(`[${new Date().toISOString()}] ⚠️ Conexão MongoDB perdida`))
-})
+interface DatabaseStatus {
+  isConnected: boolean;
+  readyState: ConnectionStates;
+  readyStateDescription: string;
+  host: string;
+  database: string;
+  connectionAttempts: number;
+}
 
-mongoose.connection.on('reconnected', () => {
-  console.log(chalk.green(`[${new Date().toISOString()}] 🔄 Conexão MongoDB reestabelecida`))
-})
+class DatabaseManager {
+  private isConnected: boolean = false;
+  private connectionAttempts: number = 0;
+  private readonly maxAttempts: number = 3;
 
-mongoose.connection.on('error', (error) => {
-  console.error(chalk.red.bold(`[${new Date().toISOString()}] ❌ Erro na conexão MongoDB`))
-  console.error(chalk.red(`   → Detalhes: ${error.message}`))
-})
+  getConnectionStatus(): DatabaseStatus {
+    const mongoUri = process.env.MONGODB_URI || "not configured";
+    const databaseName = this.extractDatabaseName(mongoUri);
 
-const connectDB = async () => {
-  const uri = process.env.MONGODB_URI || ''
-  if (!uri) throw new Error('MONGODB_URI não definido no .env')
+    return {
+      isConnected: this.isConnected,
+      readyState: mongoose.connection.readyState,
+      readyStateDescription: this.getReadyStateDescription(
+        mongoose.connection.readyState
+      ),
+      host: mongoUri,
+      database: databaseName,
+      connectionAttempts: this.connectionAttempts,
+    };
+  }
 
-  try {
-    const startTime = Date.now()
-    
-    await mongoose.connect(uri, {
-      serverSelectionTimeoutMS: 5000,
-      maxPoolSize: 10,
-      socketTimeoutMS: 45000,
-      family: 4,
-      retryWrites: true,
-      w: 'majority'
-    })
-    
-    const connectionTime = Date.now() - startTime
-    
-    console.log(chalk.green.bold(`[${new Date().toISOString()}] ✅ MongoDB Atlas conectado com sucesso!`))
-    console.log(chalk.blue(`   → Cluster: ${mongoose.connection.host}`))
-    console.log(chalk.blue(`   → Database: ${mongoose.connection.name}`))
-    console.log(chalk.blue(`   → Tempo de conexão: ${connectionTime}ms`))
-    console.log(chalk.blue(`   → Status: ${mongoose.connection.readyState === 1 ? 'Conectado' : 'Desconectado'}`))
-  } catch (error) {
-    console.error(chalk.red.bold(`[${new Date().toISOString()}] ❌ Falha ao conectar ao MongoDB Atlas`))
-    console.error(chalk.red(`   → Erro: ${error instanceof Error ? error.message : 'Erro desconhecido'}`))
-    throw error
+  private extractDatabaseName(mongoUri: string): string {
+    try {
+      const url = new URL(mongoUri);
+      return url.pathname.replace("/", "") || "beautytime-users";
+    } catch {
+      return "beautytime-users";
+    }
+  }
+
+  private getReadyStateDescription(readyState: ConnectionStates): string {
+    // ✅ CORREÇÃO: Use apenas os valores que sabemos existir
+    const states: { [key: number]: string } = {
+      0: "disconnected",
+      1: "connected",
+      2: "connecting",
+      3: "disconnecting",
+      // Adicione outros estados se necessário
+    };
+
+    return states[readyState] || "unknown";
+  }
+
+  async connectDB(): Promise<void> {
+    if (this.isConnected) {
+      return;
+    }
+
+    try {
+      this.connectionAttempts++;
+
+      const MONGODB_URI = process.env.MONGODB_URI;
+      if (!MONGODB_URI) {
+        throw new Error("MONGODB_URI não configurada");
+      }
+
+      await mongoose.connect(MONGODB_URI);
+      this.isConnected = true;
+
+      const dbStatus = this.getConnectionStatus();
+      console.log(colors.success("🗄️  ✅ MongoDB conectado - User Service"));
+      console.log(colors.white(`   📁 Database: ${dbStatus.database}`));
+      console.log(colors.gray(`   🔗 Host: ${dbStatus.host}`));
+
+      mongoose.connection.on("error", (error) => {
+        console.error(colors.error("🗄️ ❌ Erro MongoDB:"), error);
+        this.isConnected = false;
+      });
+
+      mongoose.connection.on("disconnected", () => {
+        console.log(colors.warning("🗄️ ⚠️  MongoDB desconectado"));
+        this.isConnected = false;
+      });
+    } catch (error) {
+      console.error(
+        colors.error(
+          `🗄️ ❌ Falha na conexão MongoDB (tentativa ${this.connectionAttempts}):`
+        ),
+        error
+      );
+
+      if (this.connectionAttempts < this.maxAttempts) {
+        console.log(
+          colors.warning(`   🔄 Tentando reconectar em 5 segundos...`)
+        );
+        setTimeout(() => this.connectDB(), 5000);
+      } else {
+        throw new Error(
+          `Não foi possível conectar ao MongoDB após ${this.maxAttempts} tentativas`
+        );
+      }
+    }
+  }
+
+  async disconnectDB(): Promise<void> {
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.disconnect();
+      this.isConnected = false;
+      console.log(colors.info("📦 Conexão MongoDB fechada"));
+    }
   }
 }
 
-const disconnectDB = async () => {
-  try {
-    await mongoose.disconnect()
-    console.log(chalk.yellow.bold(`[${new Date().toISOString()}] 📦 MongoDB desconectado com sucesso`))
-  } catch (error) {
-    console.error(chalk.red.bold(`[${new Date().toISOString()}] ❌ Falha ao desconectar do MongoDB`))
-    console.error(chalk.red(`   → Erro: ${error instanceof Error ? error.message : 'Erro desconhecido'}`))
-    throw error
-  }
-}
-
-export { connectDB, disconnectDB }
+export default new DatabaseManager();
