@@ -3,7 +3,7 @@ import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { requestLogger } from "./middlewares/request-logger.middleware";
-import apiRoutes from "./routes/index";
+import apiRoutes from "./routes/index.routes";
 import chalk from "chalk";
 import { AppError } from "./utils/AppError";
 import databaseManager from "./config/database";
@@ -32,7 +32,8 @@ app.use(express.json({ limit: "10mb" }));
 
 // 3. ✅ CORS APENAS PARA GATEWAY
 const allowedOrigins = [
-  "http://localhost:8080", // Gateway
+  //"http://localhost:8080", // Gateway
+  "https://gateway-6rov.onrender.com", // Gateway em producao
   "http://localhost:9000", // Frontend
 ];
 

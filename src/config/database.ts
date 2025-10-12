@@ -84,7 +84,7 @@ class DatabaseManager {
       const dbStatus = this.getConnectionStatus();
       console.log(colors.success("🗄️  ✅ MongoDB conectado - User Service"));
       console.log(colors.white(`   📁 Database: ${dbStatus.database}`));
-      console.log(colors.gray(`   🔗 Host: ${dbStatus.host}`));
+   
 
       mongoose.connection.on("error", (error) => {
         console.error(colors.error("🗄️ ❌ Erro MongoDB:"), error);
