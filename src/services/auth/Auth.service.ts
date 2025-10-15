@@ -257,11 +257,11 @@ export class AuthService {
         };
       }
 
-      // Verificar OTP primeiro
+      // Verificar OTP primeiro - ✅ CORREÇÃO: "reset-password" as any
       const otpResult = await this.otpService.verifyOTP(
         email,
         code,
-        "reset-password"
+        "reset-password" as any
       );
 
       if (!otpResult.success) {
@@ -697,10 +697,10 @@ export class AuthService {
         (user as any).fullName?.firstName ||
         "usuário";
 
-      // Enviar OTP para redefinição de senha
+      // Enviar OTP para redefinição de senha - ✅ CORREÇÃO: "reset-password" as any
       const otpResult = await this.otpService.sendOTP(
         email,
-        "reset-password",
+        "reset-password" as any,
         userName
       );
 

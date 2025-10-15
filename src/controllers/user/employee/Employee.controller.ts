@@ -15,6 +15,9 @@ export class EmployeeController {
   }
 
   // 🎯 REGISTRO DE EMPLOYEE COM VERIFICAÇÃO OTP
+  // src/controllers/user/employee/Employee.controller.ts
+  // CORREÇÃO NO MÉTODO register:
+
   public register = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const employeeData = req.body;
@@ -49,8 +52,8 @@ export class EmployeeController {
         throw new AppError("Sub-role inválido", 400, "INVALID_SUBROLE");
       }
 
-      // 🎯 VERIFICAR SE EMAIL ESTÁ VERIFICADO VIA OTP
-      const otpStatus = this.otpService.getOTPStatus(employeeData.email);
+      // ✅ CORREÇÃO: ADICIONAR AWAIT
+      const otpStatus = await this.otpService.getOTPStatus(employeeData.email);
 
       if (!otpStatus.exists) {
         throw new AppError(
@@ -75,7 +78,7 @@ export class EmployeeController {
       }
 
       // 🎯 INVALIDAR OTP APÓS REGISTRO BEM-SUCEDIDO
-      this.otpService.invalidateOTP(employeeData.email);
+      await this.otpService.invalidateOTP(employeeData.email);
 
       // 🎯 GERAR TOKENS JWT
       const tokenPair = generateTokenPair({
@@ -94,48 +97,6 @@ export class EmployeeController {
       };
 
       return res.status(201).json(responseWithToken);
-    } catch (error) {
-      return next(error);
-    }
-  };
-
-  // 🎯 LOGIN DE EMPLOYEE
-  public login = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { email, password } = req.body;
-
-      if (!email || !password) {
-        throw new AppError(
-          "Email e senha são obrigatórios",
-          400,
-          "MISSING_CREDENTIALS"
-        );
-      }
-
-      const result = await this.employeeService.authenticate(email, password);
-
-      if (!result.success) {
-        const statusCode = result.code === "ACCOUNT_LOCKED" ? 423 : 401;
-        return res.status(statusCode).json(result);
-      }
-
-      // 🎯 GERAR TOKENS JWT
-      const tokenPair = generateTokenPair({
-        id: result.data!.id,
-        email: result.data!.email,
-        role: result.data!.role,
-        subRole: result.data!.subRole,
-        isVerified: result.data!.isVerified,
-      });
-
-      const responseWithToken = {
-        ...result,
-        accessToken: tokenPair.accessToken,
-        refreshToken: tokenPair.refreshToken,
-        expiresIn: tokenPair.expiresIn,
-      };
-
-      return res.status(200).json(responseWithToken);
     } catch (error) {
       return next(error);
     }

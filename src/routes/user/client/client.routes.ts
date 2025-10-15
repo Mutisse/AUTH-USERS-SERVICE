@@ -10,10 +10,7 @@ const router = Router();
 const clientController = new ClientController();
 
 // 🎯 ROTAS PÚBLICAS - OTP E AUTENTICAÇÃO
-router.post('/request-otp', clientController.requestOTP);
-router.post('/verify-otp', clientController.verifyOTP);
 router.post('/register', clientController.register);
-router.post('/login', clientController.login);
 
 // 🎯 ROTAS PROTEGIDAS - REQUER AUTENTICAÇÃO E SER CLIENTE
 router.get('/profile', authenticate, requireClient, clientController.getProfile);

@@ -1,31 +1,11 @@
 import * as nodemailer from "nodemailer";
-import { AppError } from "../../utils/AppError";
-
-export interface EmailOptions {
-  to: string;
-  subject: string;
-  template: "otp" | "welcome" | "reset-password";
-  data: {
-    name?: string;
-    otp?: string;
-    expiresIn?: number;
-  };
-}
 
 export class EmailService {
   private transporter;
+  private configVerified = false;
 
   constructor() {
-    // 🎯 CORREÇÃO: use createTransport em vez de createTransporter
     this.transporter = nodemailer.createTransport({
-      // 🎯 CONFIGURAÇÃO PARA DESENVOLVIMENTO (sem auth)
-      host: process.env.SMTP_HOST || "localhost",
-      port: parseInt(process.env.SMTP_PORT || "1025"),
-      secure: false,
-      ignoreTLS: true,
-      
-      // 🎯 PARA PRODUÇÃO, COMENTE ACIMA E DESCOMENTE ABAIXO:
-      /*
       host: process.env.SMTP_HOST || "smtp.gmail.com",
       port: parseInt(process.env.SMTP_PORT || "587"),
       secure: false,
@@ -33,48 +13,55 @@ export class EmailService {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
       },
-      */
+    });
+
+    this.verifyConfiguration().catch((error) => {
+      console.error("Falha na verificação inicial de email:", error.message);
     });
   }
 
-  // 🎯 ENVIAR OTP (COM FALLBACK PARA DESENVOLVIMENTO)
   async sendOTP(email: string, otp: string, name?: string): Promise<boolean> {
     try {
-      const subject = "Seu Código de Verificação - BeautyTime";
-      const html = this.generateOTPTemplate(otp, name);
-
-      // 🎯 MODO DESENVOLVIMENTO: APENAS LOG NO CONSOLE
-      if (process.env.NODE_ENV === "development" || !process.env.SMTP_USER) {
-        console.log("📧 [DEV MODE] Email simulado:");
-        console.log("   → Para:", email);
-        console.log("   → OTP:", otp);
-        console.log("   → Nome:", name || "N/A");
-        console.log("   → Assunto:", subject);
-        return true;
+      if (!this.configVerified) {
+        const isConfigured = await this.verifyConfiguration();
+        if (!isConfigured) {
+          return true;
+        }
       }
 
-      // 🎯 MODO PRODUÇÃO: ENVIA EMAIL REAL
-      await this.transporter.sendMail({
+      const subject = "🔐 Seu Código de Verificação - BeautyTime";
+      const html = this.generateOTPTemplate(otp, name);
+
+      const result = await this.transporter.sendMail({
         from: `"BeautyTime" <${
-          process.env.SMTP_FROM || "noreply@beautytime.com"
+          process.env.SMTP_FROM || process.env.SMTP_USER
         }>`,
         to: email,
         subject,
         html,
       });
 
-      console.log(`✅ OTP enviado para: ${email}`);
       return true;
-    } catch (error) {
-      console.error("❌ Erro ao enviar OTP:", error);
-      
-      // 🎯 FALLBACK: MOSTRA OTP NO CONSOLE EM CASO DE ERRO
-      console.log("🔄 Fallback - OTP no console:", otp);
+    } catch (error: any) {
       return true;
     }
   }
 
-  // 🎯 TEMPLATE DO OTP (mantém igual)
+  private async verifyConfiguration(): Promise<boolean> {
+    try {
+      if (this.configVerified) {
+        return true;
+      }
+
+      await this.transporter.verify();
+      this.configVerified = true;
+
+      return true;
+    } catch (error: any) {
+      return false;
+    }
+  }
+
   private generateOTPTemplate(otp: string, name?: string): string {
     return `
       <!DOCTYPE html>
@@ -83,19 +70,20 @@ export class EmailService {
         <meta charset="utf-8">
         <style>
           body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }
-          .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 10px; padding: 30px; }
-          .header { text-align: center; margin-bottom: 30px; }
-          .logo { color: #8B5CF6; font-size: 24px; font-weight: bold; }
+          .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 10px; padding: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+          .header { text-align: center; margin-bottom: 30px; background: linear-gradient(135deg, #7c3aed, #5b21b6); padding: 30px; border-radius: 10px 10px 0 0; color: white; }
+          .logo { font-size: 28px; font-weight: bold; margin-bottom: 10px; }
           .otp-code { 
             background: #8B5CF6; 
             color: white; 
-            padding: 15px 30px; 
-            font-size: 32px; 
+            padding: 20px; 
+            font-size: 36px; 
             font-weight: bold; 
             text-align: center; 
             border-radius: 8px; 
             letter-spacing: 8px;
-            margin: 20px 0;
+            margin: 30px 0;
+            font-family: 'Courier New', monospace;
           }
           .warning { 
             background: #FEF3C7; 
@@ -109,6 +97,8 @@ export class EmailService {
             margin-top: 30px; 
             color: #6B7280; 
             font-size: 14px;
+            border-top: 1px solid #E5E7EB;
+            padding-top: 20px;
           }
         </style>
       </head>
@@ -116,49 +106,35 @@ export class EmailService {
         <div class="container">
           <div class="header">
             <div class="logo">💅 BeautyTime</div>
-            <h1>Verifique seu email</h1>
+            <h1 style="margin: 10px 0 0 0; font-size: 24px;">Verificação de Email</h1>
           </div>
           
-          <p>Olá ${name || "usuário"},</p>
+          <p style="font-size: 16px; color: #374151;">Olá <strong>${
+            name || "usuário"
+          }</strong>,</p>
           
-          <p>Use o código abaixo para verificar seu email e concluir seu cadastro:</p>
+          <p style="color: #6B7280; line-height: 1.6;">Use o código abaixo para verificar seu email e aceder à plataforma BeautyTime:</p>
           
           <div class="otp-code">${otp}</div>
           
-          <p>Este código expira em <strong>10 minutos</strong>.</p>
+          <p style="color: #6B7280;">Este código expira em <strong style="color: #EF4444;">10 minutos</strong>.</p>
           
           <div class="warning">
-            ⚠️ <strong>Não compartilhe este código</strong> com ninguém. 
-            Nossa equipe nunca pedirá seu código de verificação.
+            <strong>⚠️ Importante:</strong> Nunca compartilhe este código. 
+            A equipe BeautyTime nunca pedirá seu código de verificação.
           </div>
           
-          <p>Se você não solicitou este código, ignore este email.</p>
+          <p style="color: #9CA3AF; font-size: 14px;">
+            Se não reconhece este pedido, ignore este email.
+          </p>
           
           <div class="footer">
-            <p>© 2024 BeautyTime. Todos os direitos reservados.</p>
+            <p>© 2024 BeautyTime. Desenvolvido por Edilson Mutisse.</p>
+            <p>Email: ${process.env.SMTP_USER}</p>
           </div>
         </div>
       </body>
       </html>
     `;
-  }
-
-  // 🎯 VERIFICAR CONFIGURAÇÃO DO EMAIL
-  async verifyConfiguration(): Promise<boolean> {
-    try {
-      // Em desenvolvimento, sempre retorna true
-      if (process.env.NODE_ENV === "development" || !process.env.SMTP_USER) {
-        console.log("✅ Email Service (Modo Desenvolvimento)");
-        return true;
-      }
-
-      await this.transporter.verify();
-      console.log("✅ Configuração de email verificada");
-      return true;
-    } catch (error) {
-      console.error("❌ Erro na configuração de email:", error);
-      console.log("🔧 Usando modo desenvolvimento...");
-      return true; // Sempre retorna true para não bloquear o app
-    }
   }
 }

@@ -9,7 +9,6 @@ export class OTPController {
     this.otpService = new OTPService();
   }
 
-  // 🎯 SOLICITAR OTP
   public sendOTP = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { email, purpose = "registration", name } = req.body;
@@ -18,7 +17,6 @@ export class OTPController {
         throw new AppError("Email é obrigatório", 400, "MISSING_EMAIL");
       }
 
-      // Validação básica de email
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email)) {
         throw new AppError("Formato de email inválido", 400, "INVALID_EMAIL");
@@ -48,16 +46,15 @@ export class OTPController {
     }
   };
 
-  // 🎯 VERIFICAR OTP
   public verifyOTP = async (
     req: Request,
     res: Response,
     next: NextFunction
   ) => {
     try {
-      const { email, code, purpose } = req.body;
+      const { email, otpCode, purpose } = req.body;
 
-      if (!email || !code) {
+      if (!email || !otpCode) {
         throw new AppError(
           "Email e código são obrigatórios",
           400,
@@ -65,7 +62,7 @@ export class OTPController {
         );
       }
 
-      const result = await this.otpService.verifyOTP(email, code, purpose);
+      const result = await this.otpService.verifyOTP(email, otpCode, purpose);
 
       if (!result.success) {
         throw new AppError(result.message, 400, "OTP_VERIFICATION_FAILED");
@@ -78,6 +75,7 @@ export class OTPController {
           email,
           verified: true,
           purpose,
+          verifiedAt: new Date().toISOString(),
         },
       });
     } catch (error) {
@@ -85,7 +83,6 @@ export class OTPController {
     }
   };
 
-  // 🎯 REENVIAR OTP
   public resendOTP = async (
     req: Request,
     res: Response,
@@ -121,7 +118,6 @@ export class OTPController {
     }
   };
 
-  // 🎯 VERIFICAR STATUS DO OTP
   public getStatus = async (
     req: Request,
     res: Response,
@@ -134,7 +130,7 @@ export class OTPController {
         throw new AppError("Email é obrigatório", 400, "MISSING_EMAIL");
       }
 
-      const status = this.otpService.getOTPStatus(email);
+      const status = await this.otpService.getOTPStatus(email);
 
       res.status(200).json({
         success: true,

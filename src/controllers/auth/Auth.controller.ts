@@ -1,5 +1,4 @@
-import { Request, Response, NextFunction } from "express";
-import { AppError } from "../../utils/AppError";
+import { Request, Response } from "express";
 import { AuthService } from "../../services/auth/Auth.service";
 
 export class AuthController {
@@ -9,134 +8,102 @@ export class AuthController {
     this.authService = new AuthService();
   }
 
-  // 🎯 LOGIN
-  public login = async (req: Request, res: Response, next: NextFunction) => {
+  // ✅ LOGIN
+  public login = async (req: Request, res: Response) => {
     try {
       const { email, password } = req.body;
 
-      if (!email || !password) {
-        throw new AppError(
-          "Email e senha são obrigatórios",
-          400,
-          "MISSING_CREDENTIALS"
-        );
-      }
-
-      const result = await this.authService.login(email, password, {
-        ip: req.ip || "unknown",
+      const requestInfo = {
+        ip: req.ip || req.socket.remoteAddress || "unknown",
         userAgent: req.get("User-Agent") || "unknown",
-        isSecure: req.secure,
-      });
+        isSecure: req.secure || req.get("X-Forwarded-Proto") === "https",
+      };
 
-      res.status(result.statusCode).json(result);
+      const result = await this.authService.login(email, password, requestInfo);
+
+      return res.status(result.statusCode || 200).json(result);
     } catch (error) {
-      next(error);
+      console.error("[AuthController] Erro no login:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Erro interno no servidor",
+        code: "INTERNAL_ERROR",
+      });
     }
   };
 
-  // 🎯 REFRESH TOKEN
-  public refreshToken = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
+  // ✅ REFRESH TOKEN
+  public refreshToken = async (req: Request, res: Response) => {
     try {
       const { refreshToken } = req.body;
 
-      if (!refreshToken) {
-        throw new AppError(
-          "Refresh token é obrigatório",
-          400,
-          "MISSING_REFRESH_TOKEN"
-        );
-      }
+      const requestInfo = {
+        ip: req.ip || req.socket.remoteAddress || "unknown",
+        userAgent: req.get("User-Agent") || "unknown",
+      };
 
-      const result = await this.authService.refreshToken(refreshToken, {
-        ip: req.ip,
-        userAgent: req.get("User-Agent"),
+      const result = await this.authService.refreshToken(
+        refreshToken,
+        requestInfo
+      );
+
+      return res.status(result.statusCode || 200).json(result);
+    } catch (error) {
+      console.error("[AuthController] Erro no refresh token:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Erro interno no servidor",
+        code: "INTERNAL_ERROR",
       });
-
-      res.status(result.statusCode).json(result);
-    } catch (error) {
-      next(error);
     }
   };
 
-  // 🎯 VERIFICAR TOKEN
-  public verifyToken = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
+  // ✅ LOGOUT
+  public logout = async (req: Request, res: Response) => {
     try {
-      const token = req.headers.authorization?.replace("Bearer ", "");
+      const { sessionId } = req.body;
 
-      if (!token) {
-        throw new AppError("Token não fornecido", 400, "MISSING_TOKEN");
-      }
+      const logoutData = {
+        ip: req.ip || req.socket.remoteAddress || "unknown",
+        userAgent: req.get("User-Agent") || "unknown",
+        reason: "user_logout",
+      };
 
-      const result = await this.authService.verifyToken(token);
+      const result = await this.authService.logout(sessionId, logoutData);
 
-      res.status(result.statusCode).json(result);
+      return res.status(result.statusCode || 200).json(result);
     } catch (error) {
-      next(error);
-    }
-  };
-
-  // 🎯 LOGOUT
-  public logout = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const sessionId = req.headers["x-session-id"] as string;
-
-      const result = await this.authService.logout(sessionId, {
-        ip: req.ip,
-        userAgent: req.get("User-Agent"),
-        reason: "manual_logout",
+      console.error("[AuthController] Erro no logout:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Erro interno no servidor",
+        code: "INTERNAL_ERROR",
       });
-
-      res.status(result.statusCode).json(result);
-    } catch (error) {
-      next(error);
     }
   };
 
-  // 🎯 ESQUECI MINHA SENHA
-  public forgotPassword = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
+  // ✅ FORGOT PASSWORD
+  public forgotPassword = async (req: Request, res: Response) => {
     try {
       const { email } = req.body;
 
-      if (!email) {
-        throw new AppError("Email é obrigatório", 400, "MISSING_EMAIL");
-      }
-
       const result = await this.authService.forgotPassword(email);
 
-      res.status(result.statusCode).json(result);
+      return res.status(result.statusCode || 200).json(result);
     } catch (error) {
-      next(error);
+      console.error("[AuthController] Erro no forgot password:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Erro interno no servidor",
+        code: "INTERNAL_ERROR",
+      });
     }
   };
 
-  // 🎯 REDEFINIR SENHA
-  public resetPassword = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
+  // ✅ RESET PASSWORD
+  public resetPassword = async (req: Request, res: Response) => {
     try {
       const { email, code, newPassword } = req.body;
-
-      if (!email || !code || !newPassword) {
-        throw new AppError(
-          "Email, código e nova senha são obrigatórios",
-          400,
-          "MISSING_CREDENTIALS"
-        );
-      }
 
       const result = await this.authService.resetPassword(
         email,
@@ -144,159 +111,198 @@ export class AuthController {
         newPassword
       );
 
-      res.status(result.statusCode).json(result);
+      return res.status(result.statusCode || 200).json(result);
     } catch (error) {
-      next(error);
+      console.error("[AuthController] Erro no reset password:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Erro interno no servidor",
+        code: "INTERNAL_ERROR",
+      });
     }
   };
 
-  // 🎯 VERIFICAR TOKEN DE REDEFINIÇÃO (MÉTODO QUE ESTAVA FALTANDO)
-  public verifyResetToken = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
+  // ✅ VERIFY TOKEN
+  public verifyToken = async (req: Request, res: Response) => {
     try {
       const { token } = req.body;
 
-      if (!token) {
-        throw new AppError("Token é obrigatório", 400, "MISSING_TOKEN");
-      }
+      const result = await this.authService.verifyToken(token);
+
+      return res.status(result.statusCode || 200).json(result);
+    } catch (error) {
+      console.error("[AuthController] Erro na verificação de token:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Erro interno no servidor",
+        code: "INTERNAL_ERROR",
+      });
+    }
+  };
+
+  // ✅ VERIFY RESET TOKEN
+  public verifyResetToken = async (req: Request, res: Response) => {
+    try {
+      const { token } = req.body;
 
       const result = await this.authService.verifyResetToken(token);
 
-      res.status(result.statusCode).json(result);
+      return res.status(result.statusCode || 200).json(result);
     } catch (error) {
-      next(error);
+      console.error(
+        "[AuthController] Erro na verificação de reset token:",
+        error
+      );
+      return res.status(500).json({
+        success: false,
+        error: "Erro interno no servidor",
+        code: "INTERNAL_ERROR",
+      });
     }
   };
 
-  // 🎯 ENVIAR VERIFICAÇÃO DE EMAIL (MÉTODO QUE ESTAVA FALTANDO)
-  public sendVerification = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
+  // ✅ SEND VERIFICATION (OTP)
+  public sendVerification = async (req: Request, res: Response) => {
     try {
-      const user = (req as any).user;
-      const { email } = req.body;
+      const { email, name } = req.body;
 
-      if (!user && !email) {
-        throw new AppError("Email é obrigatório", 400, "MISSING_EMAIL");
-      }
+      const result = await this.authService.sendVerification(email, name);
 
-      const targetEmail = email || user.email;
-      const name = user?.name || "usuário";
-
-      const result = await this.authService.sendVerification(targetEmail, name);
-
-      res.status(result.statusCode).json(result);
+      return res.status(result.statusCode || 200).json(result);
     } catch (error) {
-      next(error);
+      console.error("[AuthController] Erro no envio de verificação:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Erro interno no servidor",
+        code: "INTERNAL_ERROR",
+      });
     }
   };
 
-  // 🎯 VERIFICAR CONTA (MÉTODO QUE ESTAVA FALTANDO)
-  public verifyAccount = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
+  // ✅ VERIFY ACCOUNT (OTP)
+  public verifyAccount = async (req: Request, res: Response) => {
     try {
-      const user = (req as any).user;
       const { email, code } = req.body;
 
-      if (!user && !email) {
-        throw new AppError("Email é obrigatório", 400, "MISSING_EMAIL");
-      }
+      const result = await this.authService.verifyAccount(email, code);
 
-      const targetEmail = email || user.email;
-
-      const result = await this.authService.verifyAccount(targetEmail, code);
-
-      res.status(result.statusCode).json(result);
+      return res.status(result.statusCode || 200).json(result);
     } catch (error) {
-      next(error);
+      console.error("[AuthController] Erro na verificação de conta:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Erro interno no servidor",
+        code: "INTERNAL_ERROR",
+      });
     }
   };
 
-  // 🎯 OBTER SESSÃO ATUAL (MÉTODO QUE ESTAVA FALTANDO)
-  public getSession = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
+  // ✅ GET SESSION
+  public getSession = async (req: Request, res: Response) => {
     try {
-      const user = (req as any).user;
+      const { sessionId } = req.body;
 
-      if (!user) {
-        throw new AppError("Não autenticado", 401, "UNAUTHENTICATED");
-      }
-
-      res.status(200).json({
-        success: true,
-        data: {
-          user: {
-            id: user.id,
-            email: user.email,
-            role: user.role,
-            subRole: user.subRole,
-            isVerified: user.isVerified,
-          },
-          session: {
-            authenticated: true,
-            timestamp: new Date().toISOString(),
-          },
-        },
+      // Implementar lógica para buscar sessão específica
+      return res.status(501).json({
+        success: false,
+        error: "Método não implementado",
+        code: "NOT_IMPLEMENTED",
       });
     } catch (error) {
-      next(error);
+      console.error("[AuthController] Erro ao buscar sessão:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Erro interno no servidor",
+        code: "INTERNAL_ERROR",
+      });
     }
   };
 
-  // 🎯 OBTER SESSÕES ATIVAS (MÉTODO QUE ESTAVA FALTANDO)
-  public getActiveSessions = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
+  // ✅ GET ACTIVE SESSIONS
+  public getActiveSessions = async (req: Request, res: Response) => {
     try {
-      const user = (req as any).user;
+      const { userId } = req.body;
 
-      if (!user) {
-        throw new AppError("Não autenticado", 401, "UNAUTHENTICATED");
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: "ID do usuário é obrigatório",
+          code: "MISSING_USER_ID",
+        });
       }
 
-      const result = await this.authService.getActiveSessions(user.id);
+      const result = await this.authService.getActiveSessions(userId);
 
-      res.status(result.statusCode).json(result);
+      return res.status(result.statusCode || 200).json(result);
     } catch (error) {
-      next(error);
+      console.error("[AuthController] Erro ao buscar sessões ativas:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Erro interno no servidor",
+        code: "INTERNAL_ERROR",
+      });
     }
   };
 
-  // 🎯 REVOGAR SESSÃO (MÉTODO QUE ESTAVA FALTANDO)
-  public revokeSession = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
+  // ✅ REVOKE SESSION
+  public revokeSession = async (req: Request, res: Response) => {
     try {
       const { sessionId } = req.params;
-      const user = (req as any).user;
+      const { userId } = req.body;
 
-      if (!user) {
-        throw new AppError("Não autenticado", 401, "UNAUTHENTICATED");
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: "ID do usuário é obrigatório",
+          code: "MISSING_USER_ID",
+        });
       }
 
-      const result = await this.authService.revokeSession(sessionId, user.id, {
-        ip: req.ip,
-        userAgent: req.get("User-Agent"),
-      });
+      const revokeData = {
+        ip: req.ip || req.socket.remoteAddress || "unknown",
+        userAgent: req.get("User-Agent") || "unknown",
+      };
 
-      res.status(result.statusCode).json(result);
+      const result = await this.authService.revokeSession(
+        sessionId,
+        userId,
+        revokeData
+      );
+
+      return res.status(result.statusCode || 200).json(result);
     } catch (error) {
-      next(error);
+      console.error("[AuthController] Erro ao revogar sessão:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Erro interno no servidor",
+        code: "INTERNAL_ERROR",
+      });
+    }
+  };
+
+  // ✅ CHECK EMAIL AVAILABILITY (NOVO MÉTODO)
+  public checkEmailAvailability = async (req: Request, res: Response) => {
+    try {
+      const { email } = req.body;
+
+      if (!email) {
+        return res.status(400).json({
+          success: false,
+          error: "Email é obrigatório",
+          code: "MISSING_EMAIL",
+        });
+      }
+
+      const result = await this.authService.checkEmailAvailability(email);
+
+      return res.status(result.statusCode || 200).json(result);
+    } catch (error) {
+      console.error("[AuthController] Erro ao verificar email:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Erro interno no servidor",
+        code: "INTERNAL_ERROR",
+      });
     }
   };
 }

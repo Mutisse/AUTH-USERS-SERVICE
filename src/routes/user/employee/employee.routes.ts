@@ -9,7 +9,7 @@ const employeeController = new EmployeeController();
 router.post('/request-otp', employeeController.requestOTP);
 router.post('/verify-otp', employeeController.verifyOTP);
 router.post('/register', employeeController.register);
-router.post('/login', employeeController.login);
+
 
 // 🎯 ROTAS PROTEGIDAS - EMPLOYEES
 router.get('/profile', authenticate, requireEmployee, employeeController.getProfile);

@@ -5,7 +5,10 @@ import { AppError } from "../utils/AppError";
 const otpService = new OTPService();
 
 // 🎯 VERIFICAR SE EMAIL ESTÁ VERIFICADO VIA OTP
-export const requireEmailVerification = (
+// src/middlewares/otp.middleware.ts
+// CORREÇÃO NO MIDDLEWARE:
+
+export const requireEmailVerification = async (
   req: Request,
   res: Response,
   next: NextFunction
@@ -17,7 +20,8 @@ export const requireEmailVerification = (
       throw new AppError("Email é obrigatório", 400, "MISSING_EMAIL");
     }
 
-    const otpStatus = otpService.getOTPStatus(email);
+    // ✅ CORREÇÃO: ADICIONAR AWAIT
+    const otpStatus = await otpService.getOTPStatus(email);
 
     if (!otpStatus.exists) {
       throw new AppError(

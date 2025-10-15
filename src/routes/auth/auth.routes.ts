@@ -4,20 +4,25 @@ import { AuthController } from "../../controllers/auth/Auth.controller";
 const router = Router();
 const authController = new AuthController();
 
-// ✅ VERIFIQUE SE TODOS ESTES MÉTODOS EXISTEM NO AuthController
+// ✅ AUTENTICAÇÃO BÁSICA
 router.post("/login", authController.login);
 router.post("/refresh-token", authController.refreshToken);
 router.post("/logout", authController.logout);
+
+// ✅ RECUPERAÇÃO DE SENHA
 router.post("/forgot-password", authController.forgotPassword);
 router.post("/reset-password", authController.resetPassword);
 
 // 🎯 VERIFICAÇÃO DE TOKEN
 router.post("/verify-token", authController.verifyToken);
-router.post("/verify-reset-token", authController.verifyResetToken); // ← LINHA 19 (PROVÁVEL ERRO)
+router.post("/verify-reset-token", authController.verifyResetToken);
 
-// 🎯 VERIFICAÇÃO DE EMAIL
+// 🎯 VERIFICAÇÃO DE EMAIL (OTP)
 router.post("/send-verification", authController.sendVerification);
 router.post("/verify-account", authController.verifyAccount);
+
+// 🎯 VERIFICAÇÃO DE DISPONIBILIDADE DE EMAIL (NOVA ROTA)
+router.post("/check-email", authController.checkEmailAvailability);
 
 // 🎯 GERENCIAMENTO DE SESSÕES
 router.get("/session", authController.getSession);
@@ -37,6 +42,8 @@ router.get("/health", (req, res) => {
       "forgot-password",
       "reset-password",
       "token-verification",
+      "email-verification",
+      "email-availability-check",
       "session-management",
     ],
   });

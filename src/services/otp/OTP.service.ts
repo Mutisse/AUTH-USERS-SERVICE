@@ -1,61 +1,47 @@
-import NodeCache from "node-cache";
+import { OTPModel, IOTP } from "../../models/OTP.model";
+import { VerifiedEmailModel } from "../../models/VerifiedEmail.model";
 import { EmailService } from "../email/Email.service";
 import { AppError } from "../../utils/AppError";
 
-export interface OTPData {
-  code: string;
-  email: string;
-  attempts: number;
-  createdAt: Date;
-  verified: boolean;
-  purpose: "registration" | "reset-password" | "login";
-}
-
 export class OTPService {
-  private cache: NodeCache;
   private emailService: EmailService;
-
-  // 🎯 CONFIGURAÇÕES OTP
   private readonly OTP_CONFIG = {
     LENGTH: 6,
-    EXPIRES_IN: 10 * 60, // 10 minutos em segundos
-    MAX_ATTEMPTS: 3,
-    RESEND_DELAY: 60, // 1 minuto entre reenvios
+    EXPIRES_IN: 30,
+    MAX_ATTEMPTS: 5,
+    RESEND_DELAY: 60,
   };
 
   constructor() {
-    this.cache = new NodeCache({
-      stdTTL: this.OTP_CONFIG.EXPIRES_IN,
-      checkperiod: 60,
-    });
     this.emailService = new EmailService();
   }
 
-  // 🎯 GERAR CÓDIGO OTP
   private generateOTP(): string {
     const digits = "0123456789";
     let otp = "";
-
     for (let i = 0; i < this.OTP_CONFIG.LENGTH; i++) {
       otp += digits[Math.floor(Math.random() * digits.length)];
     }
-
     return otp;
   }
 
-  // 🎯 ENVIAR OTP
   async sendOTP(
     email: string,
-    purpose: OTPData["purpose"] = "registration",
+    purpose: IOTP["purpose"] = "registration",
     name?: string
   ): Promise<{ success: boolean; retryAfter?: number }> {
     try {
-      // 🎯 VERIFICAR RATE LIMITING
-      const existingOTP = this.cache.get<OTPData>(email);
-      if (existingOTP) {
-        const timeElapsed = Date.now() - existingOTP.createdAt.getTime();
-        const retryAfter = this.OTP_CONFIG.RESEND_DELAY * 1000 - timeElapsed;
+      const recentOTP = await OTPModel.findOne({
+        email,
+        purpose,
+        createdAt: {
+          $gte: new Date(Date.now() - this.OTP_CONFIG.RESEND_DELAY * 1000),
+        },
+      });
 
+      if (recentOTP) {
+        const timeElapsed = Date.now() - recentOTP.createdAt.getTime();
+        const retryAfter = this.OTP_CONFIG.RESEND_DELAY * 1000 - timeElapsed;
         if (retryAfter > 0) {
           return {
             success: false,
@@ -64,25 +50,31 @@ export class OTPService {
         }
       }
 
-      // 🎯 GERAR NOVO OTP
+      await OTPModel.updateMany(
+        { email, purpose, verified: false },
+        { verified: true }
+      );
+
       const otpCode = this.generateOTP();
-      const otpData: OTPData = {
-        code: otpCode,
+      const expiresAt = new Date(
+        Date.now() + this.OTP_CONFIG.EXPIRES_IN * 60 * 1000
+      );
+
+      const otpData = new OTPModel({
         email,
-        attempts: 0,
-        createdAt: new Date(),
-        verified: false,
+        code: otpCode,
         purpose,
-      };
+        attempts: 0,
+        verified: false,
+        expiresAt,
+      });
 
-      // 🎯 SALVAR NO CACHE
-      this.cache.set(email, otpData);
+      await otpData.save();
 
-      // 🎯 ENVIAR EMAIL
       const emailSent = await this.emailService.sendOTP(email, otpCode, name);
 
       if (!emailSent) {
-        this.cache.del(email);
+        await OTPModel.findByIdAndDelete(otpData._id);
         throw new AppError(
           "Erro ao enviar email de verificação",
           500,
@@ -90,24 +82,24 @@ export class OTPService {
         );
       }
 
-      console.log(`✅ OTP gerado para ${email}: ${otpCode} (${purpose})`);
       return { success: true };
     } catch (error) {
-      console.error("❌ Erro no serviço OTP:", error);
       throw error;
     }
   }
 
-  // 🎯 VERIFICAR OTP
   async verifyOTP(
     email: string,
     code: string,
-    purpose?: OTPData["purpose"]
+    purpose?: IOTP["purpose"]
   ): Promise<{ success: boolean; message: string }> {
     try {
-      const otpData = this.cache.get<OTPData>(email);
+      const otpData = await OTPModel.findOne({
+        email,
+        purpose: purpose || "registration",
+        expiresAt: { $gt: new Date() },
+      });
 
-      // 🎯 VERIFICAÇÕES
       if (!otpData) {
         return {
           success: false,
@@ -118,12 +110,12 @@ export class OTPService {
       if (otpData.verified) {
         return {
           success: false,
-          message: "Código OTP já foi utilizado",
+          message: "Código OTP já foi utilizado. Solicite um novo código.",
         };
       }
 
       if (otpData.attempts >= this.OTP_CONFIG.MAX_ATTEMPTS) {
-        this.cache.del(email);
+        await OTPModel.findByIdAndUpdate(otpData._id, { verified: true });
         return {
           success: false,
           message:
@@ -131,104 +123,178 @@ export class OTPService {
         };
       }
 
-      if (purpose && otpData.purpose !== purpose) {
-        return {
-          success: false,
-          message: "Código OTP inválido para esta operação",
-        };
-      }
-
-      // 🎯 VERIFICAR CÓDIGO
       if (otpData.code !== code) {
-        otpData.attempts++;
-        this.cache.set(email, otpData);
+        otpData.attempts += 1;
+        await otpData.save();
 
         const remainingAttempts =
           this.OTP_CONFIG.MAX_ATTEMPTS - otpData.attempts;
-
         return {
           success: false,
           message: `Código OTP inválido. ${remainingAttempts} tentativa(s) restante(s).`,
         };
       }
 
-      // 🎯 OTP VÁLIDO - MARCA COMO VERIFICADO
+      // ✅ ATUALIZAÇÃO: Marcar OTP como verificado
       otpData.verified = true;
-      this.cache.set(email, otpData);
+      otpData.usedAt = new Date();
+      await otpData.save();
 
-      console.log(`✅ OTP verificado com sucesso para: ${email}`);
+      // ✅ NOVO: Marcar email como verificado no sistema
+      await this.markEmailAsVerified(email, 'registration');
+
       return {
         success: true,
         message: "Email verificado com sucesso",
       };
     } catch (error) {
-      console.error("❌ Erro ao verificar OTP:", error);
       throw error;
     }
   }
 
-  // 🎯 REENVIAR OTP
   async resendOTP(
     email: string,
     name?: string
   ): Promise<{ success: boolean; retryAfter?: number }> {
     try {
-      const existingOTP = this.cache.get<OTPData>(email);
+      const existingOTP = await OTPModel.findOne({
+        email,
+        verified: false,
+        expiresAt: { $gt: new Date() },
+      });
+
       const purpose = existingOTP?.purpose || "registration";
 
-      // 🎯 LIMPAR OTP ANTIGO
-      this.cache.del(email);
+      if (existingOTP) {
+        await OTPModel.findByIdAndUpdate(existingOTP._id, { verified: true });
+      }
 
-      // 🎯 ENVIAR NOVO OTP
       return await this.sendOTP(email, purpose, name);
     } catch (error) {
-      console.error("❌ Erro ao reenviar OTP:", error);
       throw error;
     }
   }
 
-  // 🎯 VERIFICAR STATUS DO OTP
-  getOTPStatus(email: string): {
+  // ✅ NOVO MÉTODO: Marcar email como verificado
+  async markEmailAsVerified(email: string, purpose: string = 'registration'): Promise<void> {
+    try {
+      await VerifiedEmailModel.findOneAndUpdate(
+        { email: email.toLowerCase().trim(), purpose },
+        {
+          isVerified: true,
+          verifiedAt: new Date(),
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 horas
+        },
+        { upsert: true, new: true }
+      );
+    } catch (error) {
+      throw new AppError('Erro ao marcar email como verificado', 500, 'EMAIL_VERIFICATION_ERROR');
+    }
+  }
+
+  // ✅ NOVO MÉTODO: Verificar se email foi verificado
+  async isEmailVerified(email: string, purpose: string = 'registration'): Promise<boolean> {
+    try {
+      const verification = await VerifiedEmailModel.findOne({
+        email: email.toLowerCase().trim(),
+        purpose,
+        isVerified: true,
+        expiresAt: { $gt: new Date() },
+      });
+      
+      return !!verification;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  // ✅ NOVO MÉTODO: Invalidar verificação de email
+  async invalidateEmailVerification(email: string, purpose: string = 'registration'): Promise<void> {
+    try {
+      await VerifiedEmailModel.findOneAndUpdate(
+        { email: email.toLowerCase().trim(), purpose },
+        { isVerified: false, verifiedAt: null }
+      );
+    } catch (error) {
+      throw new AppError('Erro ao invalidar verificação de email', 500, 'INVALIDATE_VERIFICATION_ERROR');
+    }
+  }
+
+  async getOTPStatus(email: string): Promise<{
     exists: boolean;
     verified: boolean;
     attempts: number;
     expiresAt: Date | null;
-  } {
-    const otpData = this.cache.get<OTPData>(email);
+  }> {
+    const otpData = await OTPModel.findOne({
+      email,
+      verified: false,
+      expiresAt: { $gt: new Date() },
+    });
 
     if (!otpData) {
       return { exists: false, verified: false, attempts: 0, expiresAt: null };
     }
 
-    const expiresAt = new Date(
-      otpData.createdAt.getTime() + this.OTP_CONFIG.EXPIRES_IN * 1000
-    );
-
     return {
       exists: true,
       verified: otpData.verified,
       attempts: otpData.attempts,
-      expiresAt,
+      expiresAt: otpData.expiresAt,
     };
   }
 
-  // 🎯 INVALIDAR OTP
-  invalidateOTP(email: string): void {
-    this.cache.del(email);
-    console.log(`✅ OTP invalidado para: ${email}`);
+  async invalidateOTP(email: string): Promise<void> {
+    await OTPModel.updateMany({ email, verified: false }, { verified: true });
   }
 
-  // 🎯 LIMPAR CACHE EXPIRADO (para manutenção)
-  cleanupExpiredOTPs(): void {
-    this.cache.keys().forEach((key) => {
-      const otpData = this.cache.get<OTPData>(key);
-      if (
-        otpData &&
-        otpData.createdAt.getTime() + this.OTP_CONFIG.EXPIRES_IN * 1000 <
-          Date.now()
-      ) {
-        this.cache.del(key);
-      }
+  async cleanupExpiredOTPs(): Promise<{ deleted: number }> {
+    const result = await OTPModel.deleteMany({
+      expiresAt: { $lt: new Date() },
     });
+
+    return { deleted: result.deletedCount || 0 };
+  }
+
+  async getOTPStatistics(email: string): Promise<{
+    totalSent: number;
+    totalVerified: number;
+    lastSent: Date | null;
+  }> {
+    const totalSent = await OTPModel.countDocuments({ email });
+    const totalVerified = await OTPModel.countDocuments({
+      email,
+      verified: true,
+    });
+    const lastOTP = await OTPModel.findOne({ email })
+      .sort({ createdAt: -1 })
+      .select("createdAt");
+
+    return {
+      totalSent,
+      totalVerified,
+      lastSent: lastOTP?.createdAt || null,
+    };
+  }
+
+  async getOTPByEmail(email: string): Promise<IOTP | null> {
+    return await OTPModel.findOne({
+      email,
+      verified: false,
+      expiresAt: { $gt: new Date() },
+    });
+  }
+
+  async incrementAttempts(email: string): Promise<void> {
+    const otpData = await OTPModel.findOne({
+      email,
+      verified: false,
+      expiresAt: { $gt: new Date() },
+    });
+
+    if (otpData) {
+      otpData.attempts += 1;
+      await otpData.save();
+    }
   }
 }

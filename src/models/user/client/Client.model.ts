@@ -5,7 +5,7 @@ import {
   UserPreferences,
 } from "../../interfaces/user.roles";
 
-// 🎯 INTERFACE CLIENTE CORRIGIDA
+// 🎯 INTERFACE CLIENTE SIMPLIFICADA
 export interface ClientUser extends Document {
   _id: string;
   email: string;
@@ -14,6 +14,9 @@ export interface ClientUser extends Document {
   status: UserStatus;
   isActive: boolean;
   isVerified: boolean;
+  isDeleted: boolean;
+  deletedAt?: Date;
+  deletedBy?: string;
   fullName: {
     firstName: string;
     lastName: string;
@@ -29,6 +32,7 @@ export interface ClientUser extends Document {
     zipCode?: string;
     country?: string;
   };
+  acceptTerms: boolean;
   clientData: {
     preferences: {
       favoriteServices?: string[];
@@ -77,6 +81,9 @@ const ClientSchema = new Schema<ClientUser>(
     },
     isActive: { type: Boolean, default: true },
     isVerified: { type: Boolean, default: false },
+    isDeleted: { type: Boolean, default: false },
+    deletedAt: { type: Date },
+    deletedBy: { type: String },
     fullName: {
       firstName: { type: String, required: true, trim: true },
       lastName: { type: String, default: "", trim: true },
@@ -92,6 +99,7 @@ const ClientSchema = new Schema<ClientUser>(
       zipCode: { type: String, trim: true },
       country: { type: String, trim: true },
     },
+    acceptTerms: { type: Boolean, required: true, default: false },
     clientData: {
       preferences: {
         favoriteServices: [{ type: String }],
@@ -129,8 +137,53 @@ const ClientSchema = new Schema<ClientUser>(
   }
 );
 
+// 🆕 MIDDLEWARE PARA EXCLUSÃO LÓGICA - VERSÃO SIMPLIFICADA
+ClientSchema.pre(/^find/, function (this: any, next) {
+  // Excluir documentos marcados como deletados das consultas normais
+  if (this.getOptions().includeDeleted !== true) {
+    this.where({ isDeleted: { $ne: true } });
+  }
+  next();
+});
+
+// 🆕 MÉTODO ESTÁTICO PARA INCLUIR DELETADOS
+ClientSchema.statics.includeDeleted = function () {
+  return this.find().setOptions({ includeDeleted: true });
+};
+
+// 🆕 MÉTODO ESTÁTICO PARA BUSCAR POR ID INCLUINDO DELETADOS
+ClientSchema.statics.findByIdIncludeDeleted = function (id: string) {
+  return this.findOne({ _id: id }).setOptions({ includeDeleted: true });
+};
+
+// 🆕 MÉTODO PARA EXCLUSÃO LÓGICA
+ClientSchema.methods.softDelete = function (deletedBy?: string) {
+  this.isDeleted = true;
+  this.deletedAt = new Date();
+  this.deletedBy = deletedBy;
+  this.isActive = false;
+  this.status = UserStatus.INACTIVE;
+  return this.save();
+};
+
+// 🆕 MÉTODO PARA RESTAURAR
+ClientSchema.methods.restore = function () {
+  this.isDeleted = false;
+  this.deletedAt = undefined;
+  this.deletedBy = undefined;
+  this.isActive = true;
+  this.status = UserStatus.ACTIVE;
+  return this.save();
+};
+
+// 🎯 INTERFACE PARA MÉTODOS ESTÁTICOS
+interface ClientModelStatic extends Model<ClientUser> {
+  includeDeleted(): mongoose.Query<any, ClientUser>;
+  findByIdIncludeDeleted(id: string): mongoose.Query<any, ClientUser>;
+}
+
 // 🎯 MODELO CORRIGIDO
-export const ClientModel: Model<ClientUser> = mongoose.model<ClientUser>(
+export const ClientModel = mongoose.model<ClientUser, ClientModelStatic>(
   "Client",
   ClientSchema
 );

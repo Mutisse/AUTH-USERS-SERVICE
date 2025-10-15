@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { OTPController } from "../../controllers/otp/OTP.controller";
+import { OTPController } from "../../controllers/otp/OTP.controller"; // ✅ CAMINHO CORRETO
 import { otpRateLimit } from "../../middlewares/otp.middleware";
 
 const router = Router();
@@ -20,4 +20,4 @@ router.get("/health", (req, res) => {
   });
 });
 
-export default router;
+export default router; // ✅ CORRIGIDO - tinha 'export d' no final
