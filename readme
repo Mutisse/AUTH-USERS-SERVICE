@@ -114,3 +114,22 @@ src/
     │   ├── Suporte técnico
     │   └── Relatórios globais
     └── 🔐 **Permissões:** Sistema completo           
+
+
+
+    1. 👤 USER preenche formulário de registo no Frontend
+2. 📧 FRONTEND → /client/register → GATEWAY → AUTH SERVICE
+   ✅ Auth Service CRIA user com status "PENDING_VERIFICATION"
+   ✅ Dados ficam SUSPENSOS
+
+3. 📧 AUTH SERVICE → /notifications/send-verification-email → GATEWAY → NOTIFICATION SERVICE
+   ✅ Notification Service envia otp
+
+4. 🔗 User clica digita otp
+5. 📧 NOTIFICATION SERVICE → /auth/verify-email/:token → GATEWAY → AUTH SERVICE
+   ✅ Auth Service ATUALIZA user para "VERIFIED"
+   ✅ Auth Service notifica Frontend (webhook) que user está verificado
+
+6. ✅ Frontend mostra "Registo completo!" ao user
+
+se os dados ficarem supesosa no fronte ende so endos au bacak depois de ter se confirmado o otp quais os ricos vou assumir  riscos de segruanca 

@@ -1,196 +1,55 @@
+// AUTH-USERS-SERVICE/src/controllers/user/employee/Employee.controller.ts
 import { Request, Response, NextFunction } from "express";
 import { EmployeeService } from "../../../services/user/employee/Employee.service";
-import { OTPService } from "../../../services/otp/OTP.service";
+import { UserBaseController } from "../base/UserBase.controller";
+import {
+  EmployeeSubRole,
+  UserStatus,
+} from "../../../models/interfaces/user.roles";
 import { AppError } from "../../../utils/AppError";
-import { generateTokenPair } from "../../../utils/jwt.utils";
-import { EmployeeSubRole } from "../../../models/interfaces/user.roles";
 
-export class EmployeeController {
-  private employeeService: EmployeeService;
-  private otpService: OTPService;
+export class EmployeeController extends UserBaseController {
+  protected userService = new EmployeeService();
+  protected userType = "Employee";
+  protected flowType = "employee_registration";
 
   constructor() {
-    this.employeeService = new EmployeeService();
-    this.otpService = new OTPService();
+    super();
   }
 
-  // 🎯 REGISTRO DE EMPLOYEE COM VERIFICAÇÃO OTP
-  // src/controllers/user/employee/Employee.controller.ts
-  // CORREÇÃO NO MÉTODO register:
-
-  public register = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const employeeData = req.body;
-
-      // Validações específicas do employee
-      if (!employeeData.email || !employeeData.password) {
-        throw new AppError(
-          "Email e senha são obrigatórios",
-          400,
-          "MISSING_CREDENTIALS"
-        );
-      }
-
-      if (!employeeData.fullName?.firstName) {
-        throw new AppError("Nome é obrigatório", 400, "MISSING_NAME");
-      }
-
-      if (!employeeData.employeeData?.subRole) {
-        throw new AppError(
-          "Sub-role é obrigatório (salon_owner, staff, etc.)",
-          400,
-          "MISSING_SUBROLE"
-        );
-      }
-
-      // Valida sub-role
-      if (
-        !Object.values(EmployeeSubRole).includes(
-          employeeData.employeeData.subRole
-        )
-      ) {
-        throw new AppError("Sub-role inválido", 400, "INVALID_SUBROLE");
-      }
-
-      // ✅ CORREÇÃO: ADICIONAR AWAIT
-      const otpStatus = await this.otpService.getOTPStatus(employeeData.email);
-
-      if (!otpStatus.exists) {
-        throw new AppError(
-          "Email não verificado. Solicite um código OTP primeiro.",
-          403,
-          "EMAIL_NOT_VERIFIED"
-        );
-      }
-
-      if (!otpStatus.verified) {
-        throw new AppError(
-          "Email não verificado. Complete a verificação com o código OTP.",
-          403,
-          "EMAIL_NOT_VERIFIED"
-        );
-      }
-
-      const result = await this.employeeService.createEmployee(employeeData);
-
-      if (!result.success) {
-        return res.status(result.statusCode).json(result);
-      }
-
-      // 🎯 INVALIDAR OTP APÓS REGISTRO BEM-SUCEDIDO
-      await this.otpService.invalidateOTP(employeeData.email);
-
-      // 🎯 GERAR TOKENS JWT
-      const tokenPair = generateTokenPair({
-        id: result.data!.id,
-        email: result.data!.email,
-        role: result.data!.role,
-        subRole: result.data!.subRole,
-        isVerified: result.data!.isVerified,
-      });
-
-      const responseWithToken = {
-        ...result,
-        accessToken: tokenPair.accessToken,
-        refreshToken: tokenPair.refreshToken,
-        expiresIn: tokenPair.expiresIn,
+  // ✅ IMPLEMENTAÇÃO DOS MÉTODOS ABSTRATOS
+  protected async validateSpecificData(
+    data: any
+  ): Promise<{ error: string; code: string } | null> {
+    // ✅ VALIDAR SUBROLE PARA EMPLOYEE
+    if (!data.employeeData?.subRole) {
+      return {
+        error: "subRole é obrigatório para employees",
+        code: "MISSING_SUBROLE",
       };
-
-      return res.status(201).json(responseWithToken);
-    } catch (error) {
-      return next(error);
     }
-  };
 
-  // 🎯 PERFIL DO EMPLOYEE
-  public getProfile = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
-    try {
-      const employeeId = (req as any).user?.id;
-
-      if (!employeeId) {
-        throw new AppError("Não autenticado", 401, "UNAUTHENTICATED");
-      }
-
-      const result = await this.employeeService.getProfile(employeeId);
-      return res.status(result.statusCode).json(result);
-    } catch (error) {
-      return next(error);
+    if (!Object.values(EmployeeSubRole).includes(data.employeeData.subRole)) {
+      return {
+        error: "subRole inválido",
+        code: "INVALID_SUBROLE",
+      };
     }
-  };
 
-  // 🎯 ATUALIZAR AGENDA
-  public updateSchedule = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
-    try {
-      const { employeeId } = req.params;
-      const { schedule } = req.body;
+    return null;
+  }
 
-      if (!schedule || typeof schedule !== "object") {
-        throw new AppError("Agenda inválida", 400, "INVALID_SCHEDULE");
-      }
+  protected getDefaultStatus(): UserStatus {
+    return UserStatus.VERIFIED;
+  }
 
-      // 🎯 VERIFICAR SE USUÁRIO TEM ACESSO
-      const currentUser = (req as any).user;
-      if (
-        currentUser.id !== employeeId &&
-        currentUser.role !== "admin_system"
-      ) {
-        throw new AppError("Não autorizado", 403, "UNAUTHORIZED");
-      }
+  protected getAdditionalStartRegistrationData(data: any): any {
+    return {
+      subRole: data.employeeData?.subRole,
+    };
+  }
 
-      const result = await this.employeeService.updateSchedule(
-        employeeId,
-        schedule
-      );
-      return res.status(result.statusCode).json(result);
-    } catch (error) {
-      return next(error);
-    }
-  };
-
-  // 🎯 ATUALIZAR AVALIAÇÃO
-  public updateRating = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
-    try {
-      const { employeeId } = req.params;
-      const { rating } = req.body;
-
-      if (typeof rating !== "number" || rating < 1 || rating > 5) {
-        throw new AppError(
-          "Avaliação deve ser entre 1 e 5",
-          400,
-          "INVALID_RATING"
-        );
-      }
-
-      // 🎯 APENAS CLIENTES E ADMINS PODEM AVALIAR
-      const currentUser = (req as any).user;
-      if (
-        currentUser.role !== "client" &&
-        currentUser.role !== "admin_system"
-      ) {
-        throw new AppError("Não autorizado para avaliar", 403, "UNAUTHORIZED");
-      }
-
-      const result = await this.employeeService.updateRating(
-        employeeId,
-        rating
-      );
-      return res.status(result.statusCode).json(result);
-    } catch (error) {
-      return next(error);
-    }
-  };
+  // 🎯 MÉTODOS ESPECÍFICOS DO EMPLOYEE
 
   // 🎯 ALTERAR DISPONIBILIDADE
   public toggleAvailability = async (
@@ -210,257 +69,124 @@ export class EmployeeController {
         );
       }
 
-      // 🎯 VERIFICAR SE USUÁRIO TEM ACESSO
       const currentUser = (req as any).user;
-      if (
-        currentUser.id !== employeeId &&
-        currentUser.role !== "admin_system"
-      ) {
-        throw new AppError("Não autorizado", 403, "UNAUTHORIZED");
+      if (!this.checkAuthorization(currentUser, employeeId)) {
+        return res.status(403).json(this.unauthorizedResponse());
       }
 
-      const result = await this.employeeService.toggleAvailability(
+      const result = await this.userService.toggleAvailability(
         employeeId,
         isAvailable
       );
-      return res.status(result.statusCode).json(result);
+      return res.status(result.statusCode || 200).json(result);
     } catch (error) {
       return next(error);
     }
   };
 
-  // 🎯 LISTAR EMPLOYEES POR TIPO
-  public listByRole = async (
+  // 🎯 ATUALIZAR HORÁRIO DE TRABALHO
+  public updateWorkSchedule = async (
     req: Request,
     res: Response,
     next: NextFunction
   ) => {
     try {
-      const { subRole } = req.query;
+      const { employeeId } = req.params;
+      const { schedule } = req.body;
 
-      // TODO: Implementar no service
-      return res.status(200).json({
-        success: true,
-        data: [],
-        message: `Employees com sub-role: ${subRole}`,
-      });
-    } catch (error) {
-      return next(error);
-    }
-  };
-
-  // 🎯 SOLICITAR OTP PARA EMPLOYEE (conveniência)
-  public requestOTP = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
-    try {
-      const { email, name } = req.body;
-
-      if (!email) {
-        throw new AppError("Email é obrigatório", 400, "MISSING_EMAIL");
+      if (!schedule || typeof schedule !== "object") {
+        throw new AppError("Agenda inválida", 400, "INVALID_SCHEDULE");
       }
 
-      const result = await this.otpService.sendOTP(email, "registration", name);
-
-      if (!result.success) {
-        throw new AppError(
-          `Aguarde ${result.retryAfter} segundos para solicitar um novo código`,
-          429,
-          "OTP_RATE_LIMITED"
-        );
+      const currentUser = (req as any).user;
+      if (!this.checkAuthorization(currentUser, employeeId)) {
+        return res.status(403).json(this.unauthorizedResponse());
       }
 
-      return res.status(200).json({
-        success: true,
-        message: "Código de verificação enviado para seu email",
-        data: {
-          email,
-          purpose: "registration",
-          expiresIn: "10 minutos",
-        },
-      });
+      const result = await this.userService.updateWorkSchedule(
+        employeeId,
+        schedule
+      );
+      return res.status(result.statusCode || 200).json(result);
     } catch (error) {
       return next(error);
     }
   };
 
-  // 🎯 VERIFICAR OTP PARA EMPLOYEE (conveniência)
-  public verifyOTP = async (
+  // 🎯 ATUALIZAR SERVIÇOS PRESTADOS
+  public updateServices = async (
     req: Request,
     res: Response,
     next: NextFunction
   ) => {
     try {
-      const { email, code } = req.body;
+      const { employeeId } = req.params;
+      const { services } = req.body;
 
-      if (!email || !code) {
+      if (!Array.isArray(services)) {
         throw new AppError(
-          "Email e código são obrigatórios",
+          "Serviços devem ser uma lista",
           400,
-          "MISSING_CREDENTIALS"
+          "INVALID_SERVICES"
         );
       }
 
-      const result = await this.otpService.verifyOTP(
-        email,
-        code,
-        "registration"
-      );
-
-      if (!result.success) {
-        throw new AppError(result.message, 400, "OTP_VERIFICATION_FAILED");
+      const currentUser = (req as any).user;
+      if (!this.checkAuthorization(currentUser, employeeId)) {
+        return res.status(403).json(this.unauthorizedResponse());
       }
 
-      return res.status(200).json({
-        success: true,
-        message: result.message,
-        data: {
-          email,
-          verified: true,
-          purpose: "registration",
-        },
-      });
-    } catch (error) {
-      return next(error);
-    }
-  };
-
-  // 🎯 ATUALIZAR PERFIL (MÉTODO QUE ESTAVA FALTANDO)
-  public updateProfile = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
-    try {
-      const employeeId = (req as any).user?.id;
-      const updates = req.body;
-
-      if (!employeeId) {
-        throw new AppError("Não autenticado", 401, "UNAUTHENTICATED");
-      }
-
-      const result = await this.employeeService.updateProfile(
+      const result = await this.userService.updateServices(
         employeeId,
-        updates
+        services
       );
-      return res.status(result.statusCode).json(result);
+      return res.status(result.statusCode || 200).json(result);
     } catch (error) {
       return next(error);
     }
   };
 
-  // 🎯 LISTAR TODOS OS EMPLOYEES (ADMIN)
-  public getAllEmployees = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
-    try {
-      const { page = 1, limit = 10, search } = req.query;
-
-      const result = await this.employeeService.getAllEmployees({
-        page: Number(page),
-        limit: Number(limit),
-        search: search as string,
-      });
-
-      return res.status(200).json({
-        success: true,
-        data: result.employees,
-        pagination: result.pagination,
-      });
-    } catch (error) {
-      return next(error);
-    }
-  };
-
-  // 🎯 OBTER EMPLOYEE POR ID (ADMIN)
-  public getEmployeeById = async (
+  // 🎯 ADICIONAR SERVIÇO
+  public addService = async (
     req: Request,
     res: Response,
     next: NextFunction
   ) => {
     try {
       const { employeeId } = req.params;
+      const { service } = req.body;
 
-      const result = await this.employeeService.getProfile(employeeId);
-
-      if (!result.success) {
-        return res.status(result.statusCode).json(result);
+      if (!service || typeof service !== "string") {
+        throw new AppError("Serviço inválido", 400, "INVALID_SERVICE");
       }
 
-      return res.status(200).json(result);
+      const currentUser = (req as any).user;
+      if (!this.checkAuthorization(currentUser, employeeId)) {
+        return res.status(403).json(this.unauthorizedResponse());
+      }
+
+      const result = await this.userService.addService(employeeId, service);
+      return res.status(result.statusCode || 200).json(result);
     } catch (error) {
       return next(error);
     }
   };
 
-  // 🎯 ATUALIZAR EMPLOYEE (ADMIN)
-  public updateEmployeeAdmin = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
-    try {
-      const { employeeId } = req.params;
-      const updates = req.body;
-
-      const result = await this.employeeService.updateEmployeeAdmin(
-        employeeId,
-        updates
-      );
-
-      if (!result.success) {
-        return res.status(result.statusCode).json(result);
-      }
-
-      return res.status(200).json(result);
-    } catch (error) {
-      return next(error);
-    }
-  };
-
-  // 🎯 DELETAR EMPLOYEE (ADMIN)
-  public deleteEmployee = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
-    try {
-      const { employeeId } = req.params;
-
-      const result = await this.employeeService.deleteEmployee(employeeId);
-
-      if (!result.success) {
-        return res.status(result.statusCode).json(result);
-      }
-
-      return res.status(200).json(result);
-    } catch (error) {
-      return next(error);
-    }
-  };
-
-  // 🎯 LISTAR EMPLOYEES DISPONÍVEIS
+  // 🎯 LISTAR EMPLOYEES DISPONÍVEIS (PÚBLICO)
   public getAvailableEmployees = async (
     req: Request,
     res: Response,
     next: NextFunction
   ) => {
     try {
-      const { service } = req.query;
+      const { service, subRole } = req.query;
 
-      const result = await this.employeeService.getAvailableEmployees(
-        service as string
+      const result = await this.userService.getAvailableEmployees(
+        service as string,
+        subRole as EmployeeSubRole
       );
 
-      return res.status(200).json({
-        success: true,
-        data: result.employees,
-        total: result.total,
-      });
+      return res.status(200).json(result);
     } catch (error) {
       return next(error);
     }
@@ -475,12 +201,176 @@ export class EmployeeController {
     try {
       const { employeeId } = req.params;
 
-      const result = await this.employeeService.getEmployeePublicProfile(
+      const result = await this.userService.getEmployeePublicProfile(
         employeeId
       );
 
       if (!result.success) {
-        return res.status(result.statusCode).json(result);
+        return res.status(result.statusCode || 404).json(result);
+      }
+
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // 🎯 MÉTODOS DE ADMIN PARA GERENCIAR EMPLOYEES
+  public listEmployees = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { page = 1, limit = 10, search, subRole } = req.query;
+
+      // 🚧 NOTA: Precisamos implementar este método no EmployeeService
+      // Por enquanto, vamos retornar um placeholder
+      return res.status(501).json({
+        success: false,
+        error: "Método não implementado",
+        code: "NOT_IMPLEMENTED",
+        message: "listEmployees precisa ser implementado no EmployeeService",
+      });
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  public updateEmployeeStatus = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { employeeId } = req.params;
+      const { status } = req.body;
+
+      if (!status || typeof status !== "string") {
+        throw new AppError("Status é obrigatório", 400, "INVALID_STATUS");
+      }
+
+      const currentUser = (req as any).user;
+      if (!this.checkAuthorization(currentUser)) {
+        return res.status(403).json(this.unauthorizedResponse());
+      }
+
+      // 🚧 NOTA: Precisamos implementar este método no EmployeeService
+      return res.status(501).json({
+        success: false,
+        error: "Método não implementado",
+        code: "NOT_IMPLEMENTED",
+        message:
+          "updateEmployeeStatus precisa ser implementado no EmployeeService",
+      });
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  public getEmployeeById = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { employeeId } = req.params;
+
+      const currentUser = (req as any).user;
+      if (!this.checkAuthorization(currentUser)) {
+        return res.status(403).json(this.unauthorizedResponse());
+      }
+
+      // Usar o getProfile que já existe no UserBaseService
+      const result = await this.userService.getProfile(employeeId);
+
+      if (!result.success) {
+        return res.status(result.statusCode || 404).json(result);
+      }
+
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // No EmployeeController, substitua estes métodos:
+
+  public deleteEmployee = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { employeeId } = req.params;
+      const deletedBy = (req as any).user?.id;
+
+      const currentUser = (req as any).user;
+      if (!this.checkAuthorization(currentUser)) {
+        return res.status(403).json(this.unauthorizedResponse());
+      }
+
+      // ✅ USAR O MÉTODO DA BASE
+      const result = await (this.userService as any).softDeleteUser(
+        employeeId,
+        deletedBy
+      );
+
+      if (!result.success) {
+        return res.status(result.statusCode || 400).json(result);
+      }
+
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  public restoreEmployee = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { employeeId } = req.params;
+
+      const currentUser = (req as any).user;
+      if (!this.checkAuthorization(currentUser)) {
+        return res.status(403).json(this.unauthorizedResponse());
+      }
+
+      // ✅ USAR O MÉTODO DA BASE
+      const result = await (this.userService as any).restoreUser(employeeId);
+
+      if (!result.success) {
+        return res.status(result.statusCode || 400).json(result);
+      }
+
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // 🎯 EXCLUIR PERMANENTEMENTE (HARD DELETE - ADMIN)
+  public hardDeleteEmployee = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { employeeId } = req.params;
+
+      const currentUser = (req as any).user;
+      if (!this.checkAuthorization(currentUser)) {
+        return res.status(403).json(this.unauthorizedResponse());
+      }
+
+      // ✅ USAR O MÉTODO DA BASE
+      const result = await (this.userService as any).hardDeleteUser(employeeId);
+
+      if (!result.success) {
+        return res.status(result.statusCode || 400).json(result);
       }
 
       return res.status(200).json(result);

@@ -1,8 +1,7 @@
-import bcrypt from "bcrypt";
+// AUTH-USERS-SERVICE/src/services/user/admin/Admin.service.ts
+import bcrypt from "bcryptjs";
 import { UserBaseService } from "../base/UserBase.service";
 import { AdminModel } from "../../../models/user/admin/Admin.model";
-import { ClientModel } from "../../../models/user/client/Client.model";
-import { EmployeeModel } from "../../../models/user/employee/Employee.model";
 import {
   UserMainRole,
   UserStatus,
@@ -12,87 +11,124 @@ import generateCustomUserId from "../../../utils/generateCustomUserId";
 export class AdminService extends UserBaseService {
   protected userModel = AdminModel;
 
-  // ✅ CORREÇÃO: Adicionar métodos register e login que estavam faltando
-  public async register(userData: any) {
-    try {
-      return await this.createAdmin(userData);
-    } catch (error) {
-      console.error("[AdminService] Erro no register:", error);
-      return this.errorResponse(
-        "Erro ao registrar admin",
-        "REGISTER_ERROR",
-        500,
-        error
-      );
-    }
+  // ✅ IMPLEMENTAÇÕES DOS MÉTODOS ABSTRATOS OBRIGATÓRIOS
+  protected mapToSessionUser(admin: any) {
+    return {
+      id: admin._id.toString(),
+      email: admin.email,
+      role: admin.role,
+      isVerified: admin.isVerified,
+      isActive: admin.isActive,
+      status: admin.status,
+      fullName: admin.fullName,
+      lastLogin: admin.lastLogin,
+      adminData: {
+        permissions: admin.adminData?.permissions || [],
+        accessLevel: admin.adminData?.accessLevel || "limited",
+        managedUsers: admin.adminData?.managedUsers || 0,
+        systemNotifications: admin.adminData?.systemNotifications || false,
+      },
+    };
   }
 
-  public async login(email: string, password: string) {
+  protected enrichUserData(admin: any) {
+    return {
+      ...this.mapToSessionUser(admin),
+      phoneNumber: admin.phoneNumber,
+      birthDate: admin.birthDate,
+      gender: admin.gender,
+      address: admin.address,
+      preferences: admin.preferences,
+      adminData: admin.adminData,
+      acceptTerms: admin.acceptTerms,
+      emailVerifiedAt: admin.emailVerifiedAt,
+      createdAt: admin.createdAt,
+      updatedAt: admin.updatedAt,
+    };
+  }
+
+  // ✅ IMPLEMENTAÇÃO DO MÉTODO ABSTRATO createSpecificUser
+  protected async createSpecificUser(adminData: any) {
     try {
-      const admin = await AdminModel.findOne({ email });
-      if (!admin) {
+      console.log("🎯 Criando admin com dados:", {
+        email: adminData.email,
+        firstName: adminData.fullName?.firstName,
+        acceptTerms: adminData.acceptTerms,
+      });
+
+      // 🎯 VALIDAÇÕES
+      if (!adminData.fullName?.firstName) {
+        return this.errorResponse("Nome é obrigatório", "INVALID_NAME", 400);
+      }
+
+      if (!adminData.acceptTerms) {
         return this.errorResponse(
-          "Credenciais inválidas",
-          "INVALID_CREDENTIALS",
-          401
+          "Termos devem ser aceitos",
+          "TERMS_NOT_ACCEPTED",
+          400
         );
       }
 
-      const isPasswordValid = await bcrypt.compare(password, admin.password);
-      if (!isPasswordValid) {
-        return this.errorResponse(
-          "Credenciais inválidas",
-          "INVALID_CREDENTIALS",
-          401
-        );
-      }
-
-      if (!admin.isActive) {
-        return this.errorResponse("Conta desativada", "ACCOUNT_DISABLED", 403);
-      }
-
-      return this.successResponse(
-        this.mapToSessionUser(admin),
-        200,
-        "Login realizado com sucesso"
-      );
-    } catch (error) {
-      return this.errorResponse("Erro no login", "LOGIN_ERROR", 500, error);
-    }
-  }
-
-  // 🎯 MÉTODOS ESPECÍFICOS DO ADMIN
-  public async createAdmin(adminData: any) {
-    try {
       if (!(await this.isEmailAvailable(adminData.email))) {
         return this.errorResponse("Email já cadastrado", "EMAIL_EXISTS", 409);
       }
 
-      // Gera ID personalizado para admin
+      // 🎯 GERAR ID E HASH PASSWORD
       const adminId = generateCustomUserId(UserMainRole.ADMINSYSTEM);
-
       const hashedPassword = await bcrypt.hash(adminData.password, 12);
 
+      // 🎯 CRIAR ADMIN
       const newAdmin = await AdminModel.create({
         _id: adminId,
-        ...adminData,
+        email: adminData.email.toLowerCase().trim(),
         password: hashedPassword,
         role: UserMainRole.ADMINSYSTEM,
-        status: UserStatus.ACTIVE,
-        isActive: true,
-        isVerified: true, // Admin é verificado por padrão
+        status: adminData.status || UserStatus.ACTIVE, // ✅ Admin já ativo por padrão
+        isActive: adminData.isActive !== undefined ? adminData.isActive : true,
+        isVerified:
+          adminData.isVerified !== undefined ? adminData.isVerified : true,
+        fullName: {
+          firstName: adminData.fullName.firstName.trim(),
+          lastName: adminData.fullName.lastName?.trim() || "",
+          displayName: `${adminData.fullName.firstName.trim()} ${
+            adminData.fullName.lastName?.trim() || ""
+          }`.trim(),
+        },
+        phoneNumber: adminData.phoneNumber?.trim(),
+        acceptTerms: adminData.acceptTerms,
         adminData: {
-          permissions: ["users:read", "users:write", "system:config"],
-          accessLevel: "limited",
+          permissions: adminData.adminData?.permissions || ["read", "write"],
+          accessLevel: adminData.adminData?.accessLevel || "limited",
           managedUsers: 0,
           systemNotifications: true,
-          ...adminData.adminData,
+          lastSystemAccess: new Date(),
+        },
+        preferences: {
+          theme: "dark", // ✅ Admin tem dark theme por padrão
+          notifications: {
+            email: true,
+            push: true,
+            sms: false,
+            whatsapp: false,
+          },
+          language: "pt-MZ",
+          timezone: "UTC",
         },
       });
 
       console.log(`✅ Admin criado: ${newAdmin._id}`);
+
+      const adminResponse = this.enrichUserData(newAdmin);
+
       return this.successResponse(
-        this.mapToSessionUser(newAdmin),
+        {
+          user: adminResponse,
+          tokens: {
+            accessToken: `eyJ_admin_${Date.now()}`,
+            refreshToken: `eyJ_refresh_admin_${Date.now()}`,
+            expiresIn: 3600,
+          },
+        },
         201,
         "Admin criado com sucesso"
       );
@@ -107,12 +143,224 @@ export class AdminService extends UserBaseService {
     }
   }
 
-  // 🎯 ATUALIZAR PERFIL DO ADMIN
-  public async updateProfile(adminId: string, updates: any) {
+  // ✅ MÉTODO PÚBLICO PARA CRIAR ADMIN (mantido para compatibilidade)
+  public async createAdmin(adminData: any) {
+    return this.createSpecificUser(adminData);
+  }
+
+  // 🎯 2. ATIVAR CONTA (para casos específicos)
+  public async activateAccount(adminId: string) {
+    try {
+      const admin = await AdminModel.findById(adminId);
+      if (!admin) {
+        return this.errorResponse(
+          "Admin não encontrado",
+          "ADMIN_NOT_FOUND",
+          404
+        );
+      }
+
+      admin.isVerified = true;
+      admin.isActive = true;
+      admin.status = UserStatus.ACTIVE;
+      admin.emailVerifiedAt = new Date();
+      await admin.save();
+
+      console.log(`✅ Conta ativada: ${admin._id}`);
+
+      return this.successResponse(
+        this.enrichUserData(admin),
+        200,
+        "Conta ativada com sucesso"
+      );
+    } catch (error) {
+      return this.errorResponse(
+        "Erro ao ativar conta",
+        "ACTIVATION_ERROR",
+        500,
+        error
+      );
+    }
+  }
+
+  // 🎯 3. ATUALIZAR PERMISSÕES
+  public async updatePermissions(adminId: string, permissions: string[]) {
     try {
       const admin = await AdminModel.findByIdAndUpdate(
         adminId,
-        { $set: updates },
+        { $set: { "adminData.permissions": permissions } },
+        { new: true }
+      );
+
+      if (!admin) {
+        return this.errorResponse(
+          "Admin não encontrado",
+          "ADMIN_NOT_FOUND",
+          404
+        );
+      }
+
+      return this.successResponse({
+        permissions: admin.adminData.permissions,
+        message: "Permissões atualizadas",
+      });
+    } catch (error) {
+      return this.errorResponse(
+        "Erro ao atualizar permissões",
+        "UPDATE_PERMISSIONS_ERROR",
+        500,
+        error
+      );
+    }
+  }
+
+  // 🎯 4. ATUALIZAR NÍVEL DE ACESSO
+  public async updateAccessLevel(
+    adminId: string,
+    accessLevel: "full" | "limited" | "readonly"
+  ) {
+    try {
+      const validAccessLevels = ["full", "limited", "readonly"];
+      if (!validAccessLevels.includes(accessLevel)) {
+        return this.errorResponse(
+          "Nível de acesso inválido",
+          "INVALID_ACCESS_LEVEL",
+          400
+        );
+      }
+
+      const admin = await AdminModel.findByIdAndUpdate(
+        adminId,
+        { $set: { "adminData.accessLevel": accessLevel } },
+        { new: true }
+      );
+
+      if (!admin) {
+        return this.errorResponse(
+          "Admin não encontrado",
+          "ADMIN_NOT_FOUND",
+          404
+        );
+      }
+
+      return this.successResponse({
+        accessLevel: admin.adminData.accessLevel,
+        message: "Nível de acesso atualizado",
+      });
+    } catch (error) {
+      return this.errorResponse(
+        "Erro ao atualizar nível de acesso",
+        "UPDATE_ACCESS_LEVEL_ERROR",
+        500,
+        error
+      );
+    }
+  }
+
+  // 🎯 5. REGISTRAR ACESSO AO SISTEMA
+  public async recordSystemAccess(adminId: string) {
+    try {
+      const admin = await AdminModel.findByIdAndUpdate(
+        adminId,
+        {
+          $set: { "adminData.lastSystemAccess": new Date() },
+          $inc: { "adminData.managedUsers": 0 }, // Placeholder para futuras estatísticas
+        },
+        { new: true }
+      );
+
+      if (!admin) {
+        return this.errorResponse(
+          "Admin não encontrado",
+          "ADMIN_NOT_FOUND",
+          404
+        );
+      }
+
+      return this.successResponse({
+        lastSystemAccess: admin.adminData.lastSystemAccess,
+        message: "Acesso ao sistema registrado",
+      });
+    } catch (error) {
+      return this.errorResponse(
+        "Erro ao registrar acesso",
+        "RECORD_ACCESS_ERROR",
+        500,
+        error
+      );
+    }
+  }
+
+  // 🎯 6. LISTAR ADMINS
+  public async listAdmins(options: {
+    page: number;
+    limit: number;
+    search?: string;
+    accessLevel?: string;
+  }) {
+    try {
+      const { page, limit, search, accessLevel } = options;
+      const skip = (page - 1) * limit;
+
+      let query: any = { role: UserMainRole.ADMINSYSTEM };
+
+      if (search) {
+        query.$or = [
+          { email: { $regex: search, $options: "i" } },
+          { "fullName.firstName": { $regex: search, $options: "i" } },
+          { "fullName.lastName": { $regex: search, $options: "i" } },
+        ];
+      }
+
+      if (accessLevel) {
+        query["adminData.accessLevel"] = accessLevel;
+      }
+
+      const admins = await AdminModel.find(query)
+        .select("-password")
+        .skip(skip)
+        .limit(limit)
+        .sort({ createdAt: -1 });
+
+      const total = await AdminModel.countDocuments(query);
+
+      return this.successResponse({
+        admins: admins.map((admin) => this.enrichUserData(admin)),
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit),
+        },
+      });
+    } catch (error) {
+      console.error("[AdminService] Erro ao listar admins:", error);
+      return this.errorResponse(
+        "Erro ao listar admins",
+        "LIST_ADMINS_ERROR",
+        500,
+        error
+      );
+    }
+  }
+
+  // 🎯 7. ATUALIZAR STATUS DO ADMIN
+  public async updateAdminStatus(adminId: string, status: string) {
+    try {
+      const validStatuses = Object.values(UserStatus);
+      if (!validStatuses.includes(status as UserStatus)) {
+        return this.errorResponse("Status inválido", "INVALID_STATUS", 400);
+      }
+
+      const admin = await AdminModel.findByIdAndUpdate(
+        adminId,
+        {
+          $set: {
+            status,
+            isActive: status === UserStatus.ACTIVE,
+            ...(status !== UserStatus.ACTIVE && { deactivatedAt: new Date() }),
+          },
+        },
         { new: true, runValidators: true }
       ).select("-password");
 
@@ -124,169 +372,10 @@ export class AdminService extends UserBaseService {
         );
       }
 
-      return this.successResponse(this.enrichUserData(admin));
-    } catch (error) {
-      return this.errorResponse(
-        "Erro ao atualizar perfil",
-        "UPDATE_PROFILE_ERROR",
-        500,
-        error
-      );
-    }
-  }
-
-  // ✅ CORREÇÃO: Adicionar propriedade status ao options
-  public async getAllUsers(options: {
-    page: number;
-    limit: number;
-    role?: string;
-    status?: string;
-    search?: string;
-  }) {
-    try {
-      const { page, limit, role, status, search } = options;
-      const skip = (page - 1) * limit;
-
-      let query: any = {};
-
-      if (role) {
-        query.role = role;
-      }
-
-      if (status) {
-        query.status = status;
-      }
-
-      if (search) {
-        query.$or = [
-          { email: { $regex: search, $options: "i" } },
-          { "fullName.firstName": { $regex: search, $options: "i" } },
-          { "fullName.lastName": { $regex: search, $options: "i" } },
-        ];
-      }
-
-      // Buscar de todos os modelos de usuário
-      const [clients, employees, admins] = await Promise.all([
-        role === "client" || !role
-          ? ClientModel.find(query).select("-password").skip(skip).limit(limit)
-          : [],
-        role === "employee" || !role
-          ? EmployeeModel.find(query)
-              .select("-password")
-              .skip(skip)
-              .limit(limit)
-          : [],
-        role === "admin_system" || !role
-          ? AdminModel.find(query).select("-password").skip(skip).limit(limit)
-          : [],
-      ]);
-
-      const allUsers = [...clients, ...employees, ...admins];
-      const total = allUsers.length;
-
-      // ✅ CORREÇÃO: Retornar users em vez de data
-      return {
-        users: allUsers.map((user) => this.enrichUserData(user)),
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit),
-        },
-      };
-    } catch (error) {
-      console.error("[AdminService] Erro ao listar usuários:", error);
-      throw error;
-    }
-  }
-
-  // 🎯 OBTER USUÁRIO POR ID
-  public async getUserById(userId: string) {
-    try {
-      // Tentar encontrar em todos os modelos
-      const [client, employee, admin] = await Promise.all([
-        ClientModel.findById(userId).select("-password"),
-        EmployeeModel.findById(userId).select("-password"),
-        AdminModel.findById(userId).select("-password"),
-      ]);
-
-      const user = client || employee || admin;
-
-      if (!user) {
-        return this.errorResponse(
-          "Usuário não encontrado",
-          "USER_NOT_FOUND",
-          404
-        );
-      }
-
-      return this.successResponse(this.enrichUserData(user));
-    } catch (error) {
-      return this.errorResponse(
-        "Erro ao buscar usuário",
-        "GET_USER_ERROR",
-        500,
-        error
-      );
-    }
-  }
-
-  // 🎯 ATUALIZAR STATUS DO USUÁRIO
-  public async updateUserStatus(userId: string, status: string) {
-    try {
-      const validStatuses = ["active", "inactive", "suspended", "pending"];
-      if (!validStatuses.includes(status)) {
-        return this.errorResponse("Status inválido", "INVALID_STATUS", 400);
-      }
-
-      // Tentar atualizar em todos os modelos
-      const [client, employee, admin] = await Promise.all([
-        ClientModel.findByIdAndUpdate(
-          userId,
-          {
-            $set: {
-              status,
-              isActive: status === "active",
-            },
-          },
-          { new: true, runValidators: true }
-        ),
-        EmployeeModel.findByIdAndUpdate(
-          userId,
-          {
-            $set: {
-              status,
-              isActive: status === "active",
-            },
-          },
-          { new: true, runValidators: true }
-        ),
-        AdminModel.findByIdAndUpdate(
-          userId,
-          {
-            $set: {
-              status,
-              isActive: status === "active",
-            },
-          },
-          { new: true, runValidators: true }
-        ),
-      ]);
-
-      const updatedUser = client || employee || admin;
-
-      if (!updatedUser) {
-        return this.errorResponse(
-          "Usuário não encontrado",
-          "USER_NOT_FOUND",
-          404
-        );
-      }
-
       return this.successResponse(
-        this.enrichUserData(updatedUser),
+        this.enrichUserData(admin),
         200,
-        `Status do usuário atualizado para ${status}`
+        `Status do admin atualizado para ${status}`
       );
     } catch (error) {
       console.error("[AdminService] Erro ao atualizar status:", error);
@@ -299,264 +388,71 @@ export class AdminService extends UserBaseService {
     }
   }
 
-  // 🎯 DELETAR USUÁRIO
-  public async deleteUser(userId: string) {
+  // ✅ MÉTODO AUXILIAR PARA VERIFICAR EMAIL (PROTECTED em vez de PRIVATE)
+  protected async isEmailAvailable(email: string): Promise<boolean> {
+    const admin = await AdminModel.findOne({
+      email: email.toLowerCase().trim(),
+    });
+    return !admin;
+  }
+
+  // ✅ MÉTODO PARA BUSCAR ADMIN POR EMAIL
+  public async findByEmail(email: string) {
     try {
-      // Tentar desativar em todos os modelos
-      const [client, employee, admin] = await Promise.all([
-        ClientModel.findByIdAndUpdate(
-          userId,
-          {
-            $set: {
-              status: "inactive",
-              isActive: false,
-            },
-          },
-          { new: true }
-        ),
-        EmployeeModel.findByIdAndUpdate(
-          userId,
-          {
-            $set: {
-              status: "inactive",
-              isActive: false,
-            },
-          },
-          { new: true }
-        ),
-        AdminModel.findByIdAndUpdate(
-          userId,
-          {
-            $set: {
-              status: "inactive",
-              isActive: false,
-            },
-          },
-          { new: true }
-        ),
-      ]);
+      const admin = await AdminModel.findOne({
+        email: email.toLowerCase().trim(),
+      }).select("-password");
 
-      const deletedUser = client || employee || admin;
-
-      if (!deletedUser) {
+      if (!admin) {
         return this.errorResponse(
-          "Usuário não encontrado",
-          "USER_NOT_FOUND",
+          "Admin não encontrado",
+          "ADMIN_NOT_FOUND",
           404
         );
       }
 
-      return this.successResponse(null, 200, "Usuário desativado com sucesso");
+      return this.successResponse(this.enrichUserData(admin));
     } catch (error) {
+      console.error("[AdminService] Erro ao buscar admin:", error);
       return this.errorResponse(
-        "Erro ao desativar usuário",
-        "DELETE_USER_ERROR",
+        "Erro ao buscar admin",
+        "FIND_ADMIN_ERROR",
         500,
         error
       );
     }
   }
 
-  // 🎯 CRIAR BACKUP
-  public async createBackup() {
+  // ✅ MÉTODO PARA ATUALIZAR DADOS DO ADMIN
+  public async updateAdmin(adminId: string, updateData: any) {
     try {
-      // Simular criação de backup
-      const backupInfo = {
-        timestamp: new Date().toISOString(),
-        users: await this.getUserCounts(),
-        size: "0 MB",
-        file: `backup_${Date.now()}.json`,
-      };
+      const admin = await AdminModel.findByIdAndUpdate(
+        adminId,
+        { $set: updateData },
+        { new: true, runValidators: true }
+      ).select("-password");
 
-      return backupInfo;
-    } catch (error) {
-      console.error("[AdminService] Erro ao criar backup:", error);
-      throw error;
-    }
-  }
-
-  // 🎯 OBTER LOGS DO SISTEMA
-  public async getSystemLogs(limit: number = 100) {
-    try {
-      // Simular logs do sistema
-      const logs = [
-        {
-          timestamp: new Date().toISOString(),
-          level: "INFO",
-          message: "Sistema iniciado",
-          service: "auth-service",
-        },
-        {
-          timestamp: new Date(Date.now() - 60000).toISOString(),
-          level: "INFO",
-          message: "Backup automático executado",
-          service: "backup-service",
-        },
-      ];
-
-      return logs.slice(0, limit);
-    } catch (error) {
-      console.error("[AdminService] Erro ao buscar logs:", error);
-      throw error;
-    }
-  }
-
-  // 🎯 MÉTODOS DE ADMINISTRAÇÃO DO SISTEMA - CORRIGIDO
-  public async getSystemStats() {
-    try {
-      // ✅ CORREÇÃO: Usar await em todos os countDocuments
-      const [
-        totalClients,
-        totalEmployees,
-        totalAdmins,
-        activeClients,
-        activeEmployees,
-        activeAdmins,
-      ] = await Promise.all([
-        ClientModel.countDocuments(),
-        EmployeeModel.countDocuments(),
-        AdminModel.countDocuments(),
-        ClientModel.countDocuments({ isActive: true }),
-        EmployeeModel.countDocuments({ isActive: true }),
-        AdminModel.countDocuments({ isActive: true }),
-      ]);
-
-      // ✅ CORREÇÃO: Agora podemos somar os números (não as promises)
-      const totalUsers = totalClients + totalEmployees + totalAdmins;
-      const activeUsers = activeClients + activeEmployees + activeAdmins;
-
-      const stats = {
-        totalUsers,
-        totalClients,
-        totalEmployees,
-        totalAdmins,
-        activeUsers,
-        inactiveUsers: totalUsers - activeUsers,
-        systemUptime: process.uptime(),
-        memoryUsage: process.memoryUsage(),
-        timestamp: new Date().toISOString(),
-      };
-
-      return this.successResponse(stats);
-    } catch (error) {
-      return this.errorResponse(
-        "Erro ao buscar estatísticas",
-        "GET_STATS_ERROR",
-        500,
-        error
-      );
-    }
-  }
-
-  public async manageUser(userId: string, action: string, data?: any) {
-    try {
-      // Implementar ações de gestão de usuários
-      let result;
-
-      switch (action) {
-        case "reset_password":
-          result = await this.resetUserPassword(userId);
-          break;
-        case "update_role":
-          result = await this.updateUserRole(userId, data?.role);
-          break;
-        case "send_notification":
-          result = await this.sendUserNotification(userId, data?.message);
-          break;
-        default:
-          return this.errorResponse(
-            "Ação não suportada",
-            "UNSUPPORTED_ACTION",
-            400
-          );
+      if (!admin) {
+        return this.errorResponse(
+          "Admin não encontrado",
+          "ADMIN_NOT_FOUND",
+          404
+        );
       }
 
-      return result;
+      return this.successResponse(
+        this.enrichUserData(admin),
+        200,
+        "Admin atualizado com sucesso"
+      );
     } catch (error) {
+      console.error("[AdminService] Erro ao atualizar admin:", error);
       return this.errorResponse(
-        "Erro ao gerenciar usuário",
-        "MANAGE_USER_ERROR",
+        "Erro ao atualizar admin",
+        "UPDATE_ADMIN_ERROR",
         500,
         error
       );
     }
-  }
-
-  // 🎯 MÉTODOS AUXILIARES - CORRIGIDO
-  private async getUserCounts() {
-    // ✅ CORREÇÃO: Usar await
-    const [clients, employees, admins] = await Promise.all([
-      ClientModel.countDocuments(),
-      EmployeeModel.countDocuments(),
-      AdminModel.countDocuments(),
-    ]);
-
-    return { clients, employees, admins };
-  }
-
-  private async resetUserPassword(userId: string) {
-    // Implementar reset de senha
-    return this.successResponse({ userId }, 200, "Senha resetada com sucesso");
-  }
-
-  private async updateUserRole(userId: string, newRole: string) {
-    // Implementar atualização de role
-    return this.successResponse(
-      { userId, newRole },
-      200,
-      "Role atualizada com sucesso"
-    );
-  }
-
-  private async sendUserNotification(userId: string, message: string) {
-    // Implementar envio de notificação
-    return this.successResponse(
-      { userId, message },
-      200,
-      "Notificação enviada com sucesso"
-    );
-  }
-
-  // 🎯 IMPLEMENTAÇÕES ABSTRATAS
-  protected mapToSessionUser(admin: any) {
-    return {
-      id: admin._id.toString(),
-      email: admin.email,
-      role: admin.role,
-      isVerified: admin.isVerified,
-      isActive: admin.isActive,
-      status: admin.status,
-      fullName: admin.fullName,
-      profileImage: admin.profileImage,
-      lastLogin: admin.lastLogin,
-      adminData: {
-        permissions: admin.adminData?.permissions || [],
-        accessLevel: admin.adminData?.accessLevel,
-        managedUsers: admin.adminData?.managedUsers || 0,
-      },
-    };
-  }
-
-  protected enrichUserData(admin: any) {
-    return {
-      ...this.mapToSessionUser(admin),
-      phoneNumber: admin.phoneNumber,
-      birthDate: admin.birthDate,
-      gender: admin.gender,
-      preferences: admin.preferences,
-      adminData: admin.adminData,
-      createdAt: admin.createdAt,
-      updatedAt: admin.updatedAt,
-    };
-  }
-
-  private async isEmailAvailable(email: string): Promise<boolean> {
-    const [client, employee, admin] = await Promise.all([
-      ClientModel.findOne({ email: email.toLowerCase().trim() }),
-      EmployeeModel.findOne({ email: email.toLowerCase().trim() }),
-      AdminModel.findOne({ email: email.toLowerCase().trim() }),
-    ]);
-
-    return !client && !employee && !admin;
   }
 }

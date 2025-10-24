@@ -1,128 +1,189 @@
+// AUTH-USERS-SERVICE/src/controllers/user/admin/Admin.controller.ts
 import { Request, Response, NextFunction } from "express";
-import { AppError } from "../../../utils/AppError";
 import { AdminService } from "../../../services/user/admin/Admin.service";
+import { UserBaseController } from "../base/UserBase.controller";
+import { UserStatus } from "../../../models/interfaces/user.roles";
+import { AppError } from "../../../utils/AppError";
 
-export class AdminController {
-  private adminService: AdminService;
+export class AdminController extends UserBaseController {
+  protected userService = new AdminService();
+  protected userType = "Admin";
+  protected flowType = "admin_registration";
 
   constructor() {
-    this.adminService = new AdminService();
+    super();
   }
 
-  public getUserById = async (
+  // ✅ IMPLEMENTAÇÃO DOS MÉTODOS ABSTRATOS
+  protected async validateSpecificData(data: any): Promise<{ error: string; code: string } | null> {
+    // Admin não tem validações específicas adicionais
+    return null;
+  }
+
+  protected getDefaultStatus(): UserStatus {
+    return UserStatus.ACTIVE; // Admin já ativo por padrão
+  }
+
+  protected getAdditionalStartRegistrationData(data: any): any {
+    // Admin não tem dados adicionais no start registration
+    return {};
+  }
+
+  // 🎯 MÉTODOS ESPECÍFICOS DO ADMIN
+
+  // 🎯 ATUALIZAR PERMISSÕES
+  public updatePermissions = async (
     req: Request,
     res: Response,
     next: NextFunction
   ) => {
     try {
-      const { id } = req.params;
+      const { adminId } = req.params;
+      const { permissions } = req.body;
 
-      if (!id) {
-        throw new AppError("ID do usuário é obrigatório", 400, "MISSING_ID");
+      if (!Array.isArray(permissions)) {
+        throw new AppError(
+          "Permissões devem ser uma lista",
+          400,
+          "INVALID_PERMISSIONS"
+        );
       }
 
-      const user = await this.adminService.getUserById(id);
-
-      if (!user) {
-        throw new AppError("Usuário não encontrado", 404, "USER_NOT_FOUND");
+      const currentUser = (req as any).user;
+      if (!this.checkAuthorization(currentUser)) {
+        return res.status(403).json(this.unauthorizedResponse());
       }
 
-      return res.status(200).json({
-        success: true,
-        data: user,
-      });
+      const result = await this.userService.updatePermissions(
+        adminId,
+        permissions
+      );
+      return res.status(result.statusCode || 200).json(result);
     } catch (error) {
       return next(error);
     }
   };
 
-  public updateUserStatus = async (
+  // 🎯 ATUALIZAR NÍVEL DE ACESSO
+  public updateAccessLevel = async (
     req: Request,
     res: Response,
     next: NextFunction
   ) => {
     try {
-      const { id } = req.params;
+      const { adminId } = req.params;
+      const { accessLevel } = req.body;
+
+      const validAccessLevels = ["full", "limited", "readonly"];
+      if (!accessLevel || !validAccessLevels.includes(accessLevel)) {
+        throw new AppError(
+          "Nível de acesso inválido",
+          400,
+          "INVALID_ACCESS_LEVEL"
+        );
+      }
+
+      const currentUser = (req as any).user;
+      if (!this.checkAuthorization(currentUser)) {
+        return res.status(403).json(this.unauthorizedResponse());
+      }
+
+      const result = await this.userService.updateAccessLevel(
+        adminId,
+        accessLevel
+      );
+      return res.status(result.statusCode || 200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // 🎯 LISTAR ADMINS
+  public listAdmins = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { page = 1, limit = 10, search, accessLevel } = req.query;
+
+      const result = await this.userService.listAdmins({
+        page: Number(page),
+        limit: Number(limit),
+        search: search as string,
+        accessLevel: accessLevel as string,
+      });
+
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // 🎯 ATUALIZAR STATUS DO ADMIN
+  public updateAdminStatus = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { adminId } = req.params;
       const { status } = req.body;
 
-      if (!id || !status) {
-        throw new AppError("ID e status são obrigatórios", 400, "MISSING_DATA");
+      if (!status || typeof status !== "string") {
+        throw new AppError("Status é obrigatório", 400, "INVALID_STATUS");
       }
 
-      const user = await this.adminService.updateUserStatus(id, status);
+      const currentUser = (req as any).user;
+      if (!this.checkAuthorization(currentUser)) {
+        return res.status(403).json(this.unauthorizedResponse());
+      }
 
-      return res.status(200).json({
-        success: true,
-        message: "Status atualizado com sucesso",
-        data: user,
-      });
+      const result = await this.userService.updateAdminStatus(adminId, status);
+
+      if (!result.success) {
+        return res.status(result.statusCode || 400).json(result);
+      }
+
+      return res.status(200).json(result);
     } catch (error) {
       return next(error);
     }
   };
 
-  public deleteUser = async (
+  // 🎯 REGISTRAR ACESSO AO SISTEMA
+  public recordSystemAccess = async (
     req: Request,
     res: Response,
     next: NextFunction
   ) => {
     try {
-      const { id } = req.params;
+      const adminId = (req as any).user?.id;
 
-      if (!id) {
-        throw new AppError("ID do usuário é obrigatório", 400, "MISSING_ID");
+      if (!adminId) {
+        throw new AppError("Não autenticado", 401, "UNAUTHORIZED");
       }
 
-      await this.adminService.deleteUser(id);
-
-      return res.status(200).json({
-        success: true,
-        message: "Usuário deletado com sucesso",
-      });
+      const result = await this.userService.recordSystemAccess(adminId);
+      return res.status(result.statusCode || 200).json(result);
     } catch (error) {
       return next(error);
     }
   };
 
-  public register = async (req: Request, res: Response, next: NextFunction) => {
+  // 🎯 MÉTODOS LEGACY (MANTIDOS PARA COMPATIBILIDADE)
+  public getSystemStats = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
     try {
-      const userData = req.body;
-
-      if (!userData.email || !userData.password) {
-        throw new AppError(
-          "Email e senha são obrigatórios",
-          400,
-          "MISSING_CREDENTIALS"
-        );
-      }
-
-      const user = await this.adminService.register(userData);
-
-      return res.status(201).json({
-        success: true,
-        message: "Admin criado com sucesso",
-        data: user,
+      // 🚧 IMPLEMENTAÇÃO FUTURA
+      return res.status(501).json({
+        success: false,
+        error: "Método não implementado",
+        code: "NOT_IMPLEMENTED"
       });
-    } catch (error) {
-      return next(error);
-    }
-  };
-
-  public login = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { email, password } = req.body;
-
-      if (!email || !password) {
-        throw new AppError(
-          "Email e senha são obrigatórios",
-          400,
-          "MISSING_CREDENTIALS"
-        );
-      }
-
-      const result = await this.adminService.login(email, password);
-
-      return res.status(result.statusCode).json(result);
     } catch (error) {
       return next(error);
     }
@@ -134,132 +195,28 @@ export class AdminController {
     next: NextFunction
   ) => {
     try {
-      const { page = 1, limit = 10, role, status } = req.query;
-
-      const users = await this.adminService.getAllUsers({
-        page: Number(page),
-        limit: Number(limit),
-        role: role as string,
-        status: status as string,
-      });
-
-      // ✅ CORREÇÃO: users.users em vez de users.data
-      return res.status(200).json({
-        success: true,
-        data: users.users,
-        pagination: users.pagination,
+      // 🚧 IMPLEMENTAÇÃO FUTURA
+      return res.status(501).json({
+        success: false,
+        error: "Método não implementado",
+        code: "NOT_IMPLEMENTED"
       });
     } catch (error) {
       return next(error);
     }
   };
 
-  // ✅ CORREÇÃO: Adicionar métodos que estavam faltando nas rotas
-  public requestOTP = async (
+  public getUserById = async (
     req: Request,
     res: Response,
     next: NextFunction
   ) => {
     try {
-      const { email } = req.body;
-
-      if (!email) {
-        throw new AppError("Email é obrigatório", 400, "MISSING_EMAIL");
-      }
-
-      // Simular envio de OTP
-      return res.status(200).json({
-        success: true,
-        message: "OTP enviado com sucesso",
-        data: { email, otpSent: true },
-      });
-    } catch (error) {
-      return next(error);
-    }
-  };
-
-  public verifyOTP = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
-    try {
-      const { email, otp } = req.body;
-
-      if (!email || !otp) {
-        throw new AppError("Email e OTP são obrigatórios", 400, "MISSING_DATA");
-      }
-
-      // Simular verificação de OTP
-      return res.status(200).json({
-        success: true,
-        message: "OTP verificado com sucesso",
-        data: { email, verified: true },
-      });
-    } catch (error) {
-      return next(error);
-    }
-  };
-
-  public getProfile = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
-    try {
-      const userId = (req as any).user?.id;
-
-      if (!userId) {
-        throw new AppError("Não autenticado", 401, "UNAUTHENTICATED");
-      }
-
-      const user = await this.adminService.getUserById(userId);
-
-      return res.status(200).json({
-        success: true,
-        data: user,
-      });
-    } catch (error) {
-      return next(error);
-    }
-  };
-
-  public updateProfile = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
-    try {
-      const userId = (req as any).user?.id;
-      const updates = req.body;
-
-      if (!userId) {
-        throw new AppError("Não autenticado", 401, "UNAUTHENTICATED");
-      }
-
-      const user = await this.adminService.updateProfile(userId, updates);
-
-      return res.status(200).json({
-        success: true,
-        message: "Perfil atualizado com sucesso",
-        data: user,
-      });
-    } catch (error) {
-      return next(error);
-    }
-  };
-
-  public getSystemStats = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
-    try {
-      const stats = await this.adminService.getSystemStats();
-
-      return res.status(200).json({
-        success: true,
-        data: stats,
+      // 🚧 IMPLEMENTAÇÃO FUTURA
+      return res.status(501).json({
+        success: false,
+        error: "Método não implementado",
+        code: "NOT_IMPLEMENTED"
       });
     } catch (error) {
       return next(error);
@@ -272,23 +229,45 @@ export class AdminController {
     next: NextFunction
   ) => {
     try {
-      const { userId } = req.params;
-      const { action, data } = req.body;
+      // 🚧 IMPLEMENTAÇÃO FUTURA
+      return res.status(501).json({
+        success: false,
+        error: "Método não implementado",
+        code: "NOT_IMPLEMENTED"
+      });
+    } catch (error) {
+      return next(error);
+    }
+  };
 
-      if (!userId || !action) {
-        throw new AppError(
-          "User ID e ação são obrigatórios",
-          400,
-          "MISSING_DATA"
-        );
-      }
+  public updateUserStatus = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      // 🚧 IMPLEMENTAÇÃO FUTURA
+      return res.status(501).json({
+        success: false,
+        error: "Método não implementado",
+        code: "NOT_IMPLEMENTED"
+      });
+    } catch (error) {
+      return next(error);
+    }
+  };
 
-      const result = await this.adminService.manageUser(userId, action, data);
-
-      return res.status(200).json({
-        success: true,
-        message: "Ação executada com sucesso",
-        data: result,
+  public deleteUser = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      // 🚧 IMPLEMENTAÇÃO FUTURA
+      return res.status(501).json({
+        success: false,
+        error: "Método não implementado",
+        code: "NOT_IMPLEMENTED"
       });
     } catch (error) {
       return next(error);
@@ -301,12 +280,11 @@ export class AdminController {
     next: NextFunction
   ) => {
     try {
-      const backup = await this.adminService.createBackup();
-
-      return res.status(200).json({
-        success: true,
-        message: "Backup criado com sucesso",
-        data: backup,
+      // 🚧 IMPLEMENTAÇÃO FUTURA
+      return res.status(501).json({
+        success: false,
+        error: "Método não implementado",
+        code: "NOT_IMPLEMENTED"
       });
     } catch (error) {
       return next(error);
@@ -319,12 +297,11 @@ export class AdminController {
     next: NextFunction
   ) => {
     try {
-      const { limit = 100 } = req.query;
-      const logs = await this.adminService.getSystemLogs(Number(limit));
-
-      return res.status(200).json({
-        success: true,
-        data: logs,
+      // 🚧 IMPLEMENTAÇÃO FUTURA
+      return res.status(501).json({
+        success: false,
+        error: "Método não implementado",
+        code: "NOT_IMPLEMENTED"
       });
     } catch (error) {
       return next(error);

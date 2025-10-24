@@ -3,25 +3,74 @@ import { ClientModel } from "../../models/user/client/Client.model";
 import { EmployeeModel } from "../../models/user/employee/Employee.model";
 import { AdminModel } from "../../models/user/admin/Admin.model";
 import { SessionService } from "../session/Session.service";
-import { OTPService } from "../otp/OTP.service";
+import { RegistrationCleanupUtil } from "../../utils/RegistrationCleanupUtil"; // ✅ NOVO IMPORT
+
 import {
   generateTokenPair,
   refreshAccessToken,
   verifyToken,
   decodeToken,
 } from "../../utils/jwt.utils";
-import { AppError } from "../../utils/AppError";
 
 export class AuthService {
   private sessionService: SessionService;
-  private otpService: OTPService;
+  private cleanupUtil: RegistrationCleanupUtil; // ✅ NOVA PROPRIEDADE
 
   constructor() {
     this.sessionService = new SessionService();
-    this.otpService = new OTPService();
+    this.cleanupUtil = new RegistrationCleanupUtil(ClientModel); // ✅ INICIALIZAR CLEANUP
+    this.cleanupUtil.startScheduledCleanup(); // ✅ INICIAR AGENDAMENTO AUTOMÁTICO
   }
 
-  // 🎯 LOGIN PRINCIPAL - CORRIGIDO
+  // ✅ MÉTODO ADICIONADO: ENVIAR VERIFICAÇÃO (SEM OTP - APENAS VERIFICA EMAIL)
+  public async sendVerification(email: string) {
+    try {
+      // Verificar se email já existe
+      const [client, employee, admin] = await Promise.all([
+        ClientModel.findOne({ email: email.toLowerCase().trim() }),
+        EmployeeModel.findOne({ email: email.toLowerCase().trim() }),
+        AdminModel.findOne({ email: email.toLowerCase().trim() }),
+      ]);
+
+      const exists = !!(client || employee || admin);
+
+      if (exists) {
+        return {
+          success: false,
+          error: "Email já cadastrado",
+          code: "EMAIL_ALREADY_EXISTS",
+          statusCode: 409,
+        };
+      }
+
+      // ✅ APENAS VERIFICA DISPONIBILIDADE - OTP SERÁ ENVIADO PELO GATEWAY/NOTIFICATIONS
+      console.log(
+        `📧 [AuthService] Email disponível: ${email} - OTP será enviado pelo Gateway`
+      );
+
+      return {
+        success: true,
+        message: "Email disponível para cadastro",
+        data: {
+          email,
+          available: true,
+          requiresOtp: true, // ✅ INDICA QUE O GATEWAY DEVE ENVIAR OTP
+          timestamp: new Date().toISOString(),
+        },
+        statusCode: 200,
+      };
+    } catch (error) {
+      console.error("[AuthService] Erro no sendVerification:", error);
+      return {
+        success: false,
+        error: "Erro ao verificar email",
+        code: "VERIFICATION_ERROR",
+        statusCode: 500,
+      };
+    }
+  }
+
+  // 🎯 LOGIN PRINCIPAL - CORRIGIDO (MANTIDO IGUAL)
   public async login(
     email: string,
     password: string,
@@ -164,7 +213,7 @@ export class AuthService {
     }
   }
 
-  // 🎯 REFRESH TOKEN - CORRIGIDO
+  // 🎯 REFRESH TOKEN - CORRIGIDO (MANTIDO IGUAL)
   public async refreshToken(
     refreshToken: string,
     requestInfo?: {
@@ -178,7 +227,6 @@ export class AuthService {
       // 🎯 ATUALIZAR ATIVIDADE DA SESSÃO SE POSSÍVEL
       try {
         const payload = decodeToken(refreshToken);
-        // ✅ CORREÇÃO: Verificar sessionId de forma segura
         const sessionId = (payload as any).sessionId;
         if (sessionId && requestInfo) {
           await this.sessionService.updateSessionActivity(sessionId, {
@@ -188,7 +236,6 @@ export class AuthService {
           });
         }
       } catch (sessionError) {
-        // Não quebrar o fluxo se houver erro na sessão
         console.error(
           "[AuthService] Erro ao atualizar sessão no refresh:",
           sessionError
@@ -211,12 +258,10 @@ export class AuthService {
     }
   }
 
-  // 🎯 VERIFICAR TOKEN - CORRIGIDO
+  // 🎯 VERIFICAR TOKEN - CORRIGIDO (MANTIDO IGUAL)
   public async verifyToken(token: string) {
     try {
       const payload = verifyToken(token);
-
-      // ✅ CORREÇÃO: Acessar propriedades de forma segura
       const payloadAny = payload as any;
 
       return {
@@ -245,7 +290,7 @@ export class AuthService {
     }
   }
 
-  // 🎯 REDEFINIR SENHA - CORRIGIDO
+  // 🎯 REDEFINIR SENHA - CORRIGIDO (SEM OTP - APENAS ATUALIZA SENHA)
   public async resetPassword(email: string, code: string, newPassword: string) {
     try {
       if (newPassword.length < 6) {
@@ -257,21 +302,11 @@ export class AuthService {
         };
       }
 
-      // Verificar OTP primeiro - ✅ CORREÇÃO: "reset-password" as any
-      const otpResult = await this.otpService.verifyOTP(
-        email,
-        code,
-        "reset-password" as any
+      // ✅ CORREÇÃO: OTP SERÁ VERIFICADO PELO GATEWAY/NOTIFICATIONS SERVICE
+      console.log(
+        `[AuthService] Redefinindo senha para: ${email}, código: ${code}`
       );
-
-      if (!otpResult.success) {
-        return {
-          success: false,
-          error: otpResult.message,
-          code: "OTP_VERIFICATION_FAILED",
-          statusCode: 400,
-        };
-      }
+      // O gateway já deve ter verificado o OTP antes de chamar este método
 
       // Buscar usuário em todos os modelos
       const [client, employee, admin] = await Promise.all([
@@ -291,7 +326,6 @@ export class AuthService {
         };
       }
 
-      // ✅ CORREÇÃO: Acessar _id corretamente
       const userId = (user as any)._id;
 
       // Atualizar senha
@@ -317,9 +351,6 @@ export class AuthService {
         "password_reset"
       );
 
-      // Invalidar OTP
-      this.otpService.invalidateOTP(email);
-
       return {
         success: true,
         message: "Senha redefinida com sucesso",
@@ -341,14 +372,124 @@ export class AuthService {
     }
   }
 
-  // 🎯 MÉTODOS PRIVADOS - CORRIGIDOS
+  // 🎯 VERIFICAR CONTA - CORRIGIDO (SEM OTP - APENAS MARCA COMO VERIFICADO)
+  public async verifyAccount(email: string, code: string) {
+    try {
+      // ✅ CORREÇÃO: OTP SERÁ VERIFICADO PELO GATEWAY/NOTIFICATIONS SERVICE
+      console.log(`[AuthService] Verificando conta: ${email}, código: ${code}`);
+      // O gateway já deve ter verificado o OTP antes de chamar este método
+
+      // Buscar usuário (cliente) para marcar como verificado
+      const client = await ClientModel.findOne({
+        email: email.toLowerCase().trim(),
+      });
+
+      if (!client) {
+        return {
+          success: false,
+          error: "Usuário não encontrado",
+          code: "USER_NOT_FOUND",
+          statusCode: 404,
+        };
+      }
+
+      // Marcar como verificado
+      await ClientModel.findByIdAndUpdate(client._id, {
+        isVerified: true,
+        verifiedAt: new Date(),
+      });
+
+      return {
+        success: true,
+        message: "Conta verificada com sucesso",
+        data: {
+          email,
+          verified: true,
+          timestamp: new Date().toISOString(),
+        },
+        statusCode: 200,
+      };
+    } catch (error) {
+      console.error("[AuthService] Erro ao verificar conta:", error);
+      return {
+        success: false,
+        error: "Erro ao verificar conta",
+        code: "VERIFICATION_ERROR",
+        statusCode: 500,
+      };
+    }
+  }
+
+  // 🎯 ESQUECI MINHA SENHA - CORRIGIDO (SEM ENVIAR OTP - APENAS VERIFICA EMAIL)
+  public async forgotPassword(email: string) {
+    try {
+      if (!email) {
+        return {
+          success: false,
+          error: "Email é obrigatório",
+          code: "MISSING_EMAIL",
+          statusCode: 400,
+        };
+      }
+
+      // Buscar usuário em todos os modelos
+      const [client, employee, admin] = await Promise.all([
+        ClientModel.findOne({ email: email.toLowerCase().trim() }),
+        EmployeeModel.findOne({ email: email.toLowerCase().trim() }),
+        AdminModel.findOne({ email: email.toLowerCase().trim() }),
+      ]);
+
+      const user = client || employee || admin;
+
+      if (!user) {
+        // Por segurança, retornar sucesso mesmo se o email não existir
+        return {
+          success: true,
+          message:
+            "Se o email existir em nosso sistema, você receberá um código de recuperação",
+          data: {
+            emailExists: false, // Não revelar se o email existe ou não
+            requiresOtp: true, // ✅ INDICA QUE O GATEWAY DEVE ENVIAR OTP
+          },
+          statusCode: 200,
+        };
+      }
+
+      // ✅ CORREÇÃO: APENAS INDICA QUE O GATEWAY DEVE ENVIAR OTP
+      console.log(
+        `📧 [AuthService] Email existe: ${email} - OTP será enviado pelo Gateway`
+      );
+
+      return {
+        success: true,
+        message: "Código de recuperação será enviado para seu email",
+        data: {
+          email,
+          emailExists: true,
+          requiresOtp: true, // ✅ INDICA QUE O GATEWAY DEVE ENVIAR OTP
+          purpose: "reset-password",
+        },
+        statusCode: 200,
+      };
+    } catch (error) {
+      console.error("[AuthService] Erro no forgot password:", error);
+      return {
+        success: false,
+        error: "Erro ao processar solicitação de recuperação",
+        code: "FORGOT_PASSWORD_ERROR",
+        statusCode: 500,
+      };
+    }
+  }
+
+  // 🎯 MÉTODOS PRIVADOS - CORRIGIDOS (MANTIDOS IGUAIS)
   private async updateLastLogin(userId: string, role: string) {
     try {
       const updateData = {
         lastLogin: new Date(),
         lastActivity: new Date(),
         $inc: { loginCount: 1 },
-        $set: { failedLoginAttempts: 0 }, // Resetar tentativas falhas
+        $set: { failedLoginAttempts: 0 },
       };
 
       switch (role) {
@@ -367,7 +508,7 @@ export class AuthService {
     }
   }
 
-  // 🎯 VALIDAR CREDENCIAIS (para uso interno) - CORRIGIDO
+  // 🎯 VALIDAR CREDENCIAIS (para uso interno) - CORRIGIDO (MANTIDO IGUAL)
   public async validateCredentials(email: string, password: string) {
     try {
       const [client, employee, admin] = await Promise.all([
@@ -388,7 +529,6 @@ export class AuthService {
         return { isValid: false, user: null };
       }
 
-      // ✅ CORREÇÃO: Acessar password corretamente
       const isPasswordValid = await bcrypt.compare(
         password,
         (user as any).password
@@ -400,7 +540,7 @@ export class AuthService {
     }
   }
 
-  // 🎯 VERIFICAR TOKEN DE REDEFINIÇÃO
+  // 🎯 VERIFICAR TOKEN DE REDEFINIÇÃO (MANTIDO IGUAL)
   public async verifyResetToken(token: string) {
     try {
       const payload = verifyToken(token);
@@ -425,84 +565,7 @@ export class AuthService {
     }
   }
 
-  // 🎯 ENVIAR VERIFICAÇÃO DE EMAIL
-  public async sendVerification(email: string, name?: string) {
-    try {
-      const result = await this.otpService.sendOTP(email, "registration", name);
-
-      if (!result.success) {
-        return {
-          success: false,
-          error: `Aguarde ${result.retryAfter} segundos para solicitar um novo código`,
-          code: "OTP_RATE_LIMITED",
-          statusCode: 429,
-        };
-      }
-
-      return {
-        success: true,
-        message: "Código de verificação enviado para seu email",
-        data: {
-          email,
-          purpose: "registration",
-          expiresIn: "10 minutos",
-        },
-        statusCode: 200,
-      };
-    } catch (error) {
-      console.error("[AuthService] Erro ao enviar verificação:", error);
-      return {
-        success: false,
-        error: "Erro ao enviar código de verificação",
-        code: "VERIFICATION_SEND_ERROR",
-        statusCode: 500,
-      };
-    }
-  }
-
-  // 🎯 VERIFICAR CONTA
-  public async verifyAccount(email: string, code: string) {
-    try {
-      const result = await this.otpService.verifyOTP(
-        email,
-        code,
-        "registration"
-      );
-
-      if (!result.success) {
-        return {
-          success: false,
-          error: result.message,
-          code: "OTP_VERIFICATION_FAILED",
-          statusCode: 400,
-        };
-      }
-
-      // TODO: Atualizar usuário como verificado no banco de dados
-      // Por enquanto, apenas retorna sucesso
-
-      return {
-        success: true,
-        message: "Conta verificada com sucesso",
-        data: {
-          email,
-          verified: true,
-          timestamp: new Date().toISOString(),
-        },
-        statusCode: 200,
-      };
-    } catch (error) {
-      console.error("[AuthService] Erro ao verificar conta:", error);
-      return {
-        success: false,
-        error: "Erro ao verificar conta",
-        code: "VERIFICATION_ERROR",
-        statusCode: 500,
-      };
-    }
-  }
-
-  // 🎯 OBTER SESSÕES ATIVAS DO USUÁRIO
+  // 🎯 OBTER SESSÕES ATIVAS DO USUÁRIO (MANTIDO IGUAL)
   public async getActiveSessions(userId: string) {
     try {
       const sessions = await this.sessionService.getUserActiveSessions(userId);
@@ -526,7 +589,7 @@ export class AuthService {
     }
   }
 
-  // 🎯 REVOGAR SESSÃO - CORRIGIDO (NULL SAFETY)
+  // 🎯 REVOGAR SESSÃO - CORRIGIDO (NULL SAFETY) (MANTIDO IGUAL)
   public async revokeSession(
     sessionId: string,
     userId: string,
@@ -541,7 +604,6 @@ export class AuthService {
         reason: "revoked_by_user",
       });
 
-      // ✅ CORREÇÃO: Verificar se a sessão existe antes de acessar propriedades
       if (!session) {
         return {
           success: false,
@@ -551,7 +613,6 @@ export class AuthService {
         };
       }
 
-      // ✅ CORREÇÃO: Verificar se a sessão pertence ao usuário (segurança)
       if (session.userId !== userId) {
         return {
           success: false,
@@ -582,7 +643,7 @@ export class AuthService {
     }
   }
 
-  // 🎯 LOGOUT - CORRIGIDO (NULL SAFETY)
+  // 🎯 LOGOUT - CORRIGIDO (NULL SAFETY) (MANTIDO IGUAL)
   public async logout(
     sessionId: string,
     logoutData?: {
@@ -606,7 +667,6 @@ export class AuthService {
         logoutData
       );
 
-      // ✅ CORREÇÃO: Verificar se a sessão existe
       if (!session) {
         return {
           success: true,
@@ -633,7 +693,6 @@ export class AuthService {
     } catch (error) {
       console.error("[AuthService] Erro no logout:", error);
 
-      // Se a sessão não for encontrada, ainda retorna sucesso (idempotente)
       if ((error as any).message?.includes("não encontrada")) {
         return {
           success: true,
@@ -656,112 +715,32 @@ export class AuthService {
     }
   }
 
-  // 🎯 ESQUECI MINHA SENHA - CORRIGIDO
-  public async forgotPassword(email: string) {
+  // ✅ MÉTODO ADICIONAL: LIMPEZA MANUAL (OPCIONAL)
+  public async triggerCleanup(): Promise<{
+    success: boolean;
+    deletedCount?: number;
+    message: string;
+  }> {
     try {
-      if (!email) {
-        return {
-          success: false,
-          error: "Email é obrigatório",
-          code: "MISSING_EMAIL",
-          statusCode: 400,
-        };
-      }
+      const result = await this.cleanupUtil.manualCleanup();
 
-      // Buscar usuário em todos os modelos
-      const [client, employee, admin] = await Promise.all([
-        ClientModel.findOne({ email: email.toLowerCase().trim() }),
-        EmployeeModel.findOne({ email: email.toLowerCase().trim() }),
-        AdminModel.findOne({ email: email.toLowerCase().trim() }),
-      ]);
-
-      const user = client || employee || admin;
-
-      if (!user) {
-        // Por segurança, retornar sucesso mesmo se o email não existir
+      if (result.success) {
         return {
           success: true,
-          message:
-            "Se o email existir em nosso sistema, você receberá um código de recuperação",
-          data: {
-            emailSent: true,
-            exists: false, // Não revelar se o email existe ou não
-          },
-          statusCode: 200,
+          deletedCount: result.deletedCount,
+          message: `Limpeza manual concluída: ${result.deletedCount} registros removidos`,
         };
-      }
-
-      // ✅ CORREÇÃO: Acessar propriedades corretamente
-      const userName =
-        (user as any).fullName?.displayName ||
-        (user as any).fullName?.firstName ||
-        "usuário";
-
-      // Enviar OTP para redefinição de senha - ✅ CORREÇÃO: "reset-password" as any
-      const otpResult = await this.otpService.sendOTP(
-        email,
-        "reset-password" as any,
-        userName
-      );
-
-      if (!otpResult.success) {
+      } else {
         return {
           success: false,
-          error: `Aguarde ${otpResult.retryAfter} segundos para solicitar um novo código`,
-          code: "OTP_RATE_LIMITED",
-          statusCode: 429,
+          message: "Erro na limpeza manual",
         };
       }
-
-      return {
-        success: true,
-        message: "Código de recuperação enviado para seu email",
-        data: {
-          email,
-          purpose: "reset-password",
-          expiresIn: "10 minutos",
-          exists: true,
-        },
-        statusCode: 200,
-      };
     } catch (error) {
-      console.error("[AuthService] Erro no forgot password:", error);
+      console.error("[AuthService] Erro na limpeza manual:", error);
       return {
         success: false,
-        error: "Erro ao processar solicitação de recuperação",
-        code: "FORGOT_PASSWORD_ERROR",
-        statusCode: 500,
-      };
-    }
-  }
-
-  // 🎯 VERIFICAR DISPONIBILIDADE DE EMAIL (MÉTODO ADICIONAL ÚTIL)
-  public async checkEmailAvailability(email: string) {
-    try {
-      const [client, employee, admin] = await Promise.all([
-        ClientModel.findOne({ email: email.toLowerCase().trim() }),
-        EmployeeModel.findOne({ email: email.toLowerCase().trim() }),
-        AdminModel.findOne({ email: email.toLowerCase().trim() }),
-      ]);
-
-      const exists = !!(client || employee || admin);
-
-      return {
-        success: true,
-        data: {
-          email,
-          available: !exists,
-          exists,
-        },
-        statusCode: 200,
-      };
-    } catch (error) {
-      console.error("[AuthService] Erro ao verificar email:", error);
-      return {
-        success: false,
-        error: "Erro ao verificar disponibilidade do email",
-        code: "EMAIL_CHECK_ERROR",
-        statusCode: 500,
+        message: "Erro ao executar limpeza manual",
       };
     }
   }

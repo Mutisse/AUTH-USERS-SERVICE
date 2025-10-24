@@ -1,132 +1,233 @@
 import express from "express";
 import cors from "cors";
+import chalk from "chalk";
+import dotenv from "dotenv";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
-import { requestLogger } from "./middlewares/request-logger.middleware";
-import apiRoutes from "./routes/index.routes";
-import chalk from "chalk";
-import { AppError } from "./utils/AppError";
-import databaseManager from "./config/database";
-import { handleError, notFoundHandler } from "./middlewares/error.middleware";
+import bodyParser from "body-parser";
+import userServiceRoutes from "./routes/all-user.routes";
+
+dotenv.config();
 
 const app = express();
 
-// 🎯 CORES PADRONIZADAS
-const colors = {
-  success: chalk.green,
-  info: chalk.blue,
-  warning: chalk.yellow,
-  error: chalk.red,
-  gray: chalk.gray,
-};
+// 🕐 Utilitário de timestamp
+const getTimestamp = () => chalk.gray(`[${new Date().toISOString()}]`);
 
-// 1. CONFIGURAÇÃO INICIAL
-app.set("trust proxy", process.env.NODE_ENV === "production");
+// =============================================
+// 🎯 ORDEM CORRETA - ATUALIZADA
+// =============================================
 
-// 2. ✅ MIDDLEWARES ESSENCIAIS - ORDEM CORRIGIDA!
-app.use(express.json({ limit: "10mb" })); // ✅ PRIMEIRO - BODY PARSER
-app.use(express.urlencoded({ extended: true, limit: "10mb" })); // ✅ SEGUNDO - BODY PARSER
-app.use(helmet()); // ✅ TERCEIRO - SEGURANÇA
+// ✅ 1. CORS PRIMEIRO
+app.use(cors());
 
-// 3. ✅ CORS SIMPLIFICADO
-const allowedOrigins = [
-  "https://gateway-6rov.onrender.com",
-  "http://localhost:9000",
-  "http://localhost:8080",
-];
+// ✅ 2. SEGURANÇA
+app.use(helmet());
 
+// ✅ 3. BODY-PARSER (CRÍTICO - DEVE VIR ANTES DO LOGGING)
 app.use(
-  cors({
-    origin: allowedOrigins,
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization",
-      "X-Requested-With",
-      "x-request-id",
-      "X-Service-Name",
-      "X-Forwarded-For",
-      "Accept",
-      "Origin",
-    ],
+  bodyParser.json({
+    limit: "10mb",
+    strict: false,
   })
 );
 
-// 4. ✅ RATE LIMITING
 app.use(
-  rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: process.env.NODE_ENV === "development" ? 1000 : 300,
-    standardHeaders: true,
-    legacyHeaders: false,
-    skip: (req) => ["/health", "/UserService/health", "/"].includes(req.path),
-    handler: () => {
-      throw new AppError(
-        "Muitas requisições. Tente novamente em 15 minutos.",
-        429
-      );
-    },
+  bodyParser.urlencoded({
+    extended: true,
+    limit: "10mb",
   })
 );
 
-// 5. ✅ CONEXÃO MONGODB
-app.use(async (req, res, next) => {
-  try {
-    await databaseManager.connectDB();
-    next();
-  } catch (error) {
-    console.error(colors.error("🗄️ Erro MongoDB:"), error);
-    next(new AppError("Banco de dados indisponível", 503));
-  }
+// ✅ 4. RATE LIMITING
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
 });
+app.use(limiter);
 
-// 6. ✅ LOGGING
+// ✅ 5. MIDDLEWARE DE DEBUG (TEMPORÁRIO)
 app.use((req, res, next) => {
-  const origin = req.headers.origin || "no-origin";
-  console.log(
-    colors.info(`${req.method} ${req.path}`),
-    colors.gray(`Origem: ${origin}`)
-  );
+  console.log("🔍 [USER SERVICE DEBUG] Body parsing check:");
+  console.log("🔍 Body type:", typeof req.body);
+  console.log("🔍 Body keys:", Object.keys(req.body));
+  console.log("🔍 Body content:", JSON.stringify(req.body).substring(0, 300));
+  console.log("🔍 Content-Type:", req.headers["content-type"]);
   next();
 });
 
-app.use(requestLogger);
+// ✅ 6. LOGGER MELHORADO (AGORA COM BODY DISPONÍVEL)
+app.use((req, res, next) => {
+  const start = Date.now();
 
-// 7. ✅ ROTAS PRINCIPAIS
-app.use("/UserService", apiRoutes);
+  // Log básico da requisição
+  console.log(getTimestamp(), chalk.cyan("⬅️"), req.method, req.path);
 
-// 8. ✅ HEALTH CHECK UNIFICADO
-const getHealthData = () => {
-  const dbStatus = databaseManager.getConnectionStatus();
-  const memory = process.memoryUsage();
+  // ✅ AGORA O BODY ESTÁ DISPONÍVEL AQUI!
+  if (req.method === "POST" || req.method === "PUT" || req.method === "PATCH") {
+    // Criar uma cópia do body para logging
+    const bodyCopy = { ...req.body };
 
-  return {
-    service: "beautytime-user-service",
-    status: dbStatus.isConnected ? "healthy" : "unhealthy",
-    version: "1.0.0",
-    timestamp: new Date().toISOString(),
-    database: {
-      connected: dbStatus.isConnected,
-      host: dbStatus.host,
-      database: dbStatus.database,
-      readyState: dbStatus.readyStateDescription,
-    },
-    system: {
-      memory: `${(memory.rss / 1024 / 1024).toFixed(2)} MB`,
-      environment: process.env.NODE_ENV || "development",
-    },
+    // 🔒 Mascarar dados sensíveis
+    if (bodyCopy.password) {
+      bodyCopy.password = "********";
+    }
+    if (bodyCopy.newPassword) {
+      bodyCopy.newPassword = "********";
+    }
+    if (bodyCopy.confirmPassword) {
+      bodyCopy.confirmPassword = "********";
+    }
+    if (bodyCopy.otpCode) {
+      bodyCopy.otpCode = "******";
+    }
+
+    console.log(
+      getTimestamp(),
+      chalk.yellow("📦 CORPO DA REQUISIÇÃO:"),
+      JSON.stringify(bodyCopy, null, 2)
+    );
+  } else {
+    console.log(getTimestamp(), chalk.gray("📦 CORPO DA REQUISIÇÃO:"), "{}");
+  }
+
+  // ✅ IMPRIMIR QUERY PARAMETERS SE EXISTIREM
+  if (Object.keys(req.query).length > 0) {
+    console.log(
+      getTimestamp(),
+      chalk.blue("🔍 QUERY PARAMS:"),
+      JSON.stringify(req.query, null, 2)
+    );
+  }
+
+  // ✅ IMPRIMIR HEADERS RELEVANTES (com segurança)
+  const relevantHeaders = {
+    "content-type": req.headers["content-type"],
+    "user-agent": req.headers["user-agent"],
+    "x-forwarded-for": req.headers["x-forwarded-for"],
+    "x-service-source": req.headers["x-service-source"] || "gateway",
   };
-};
 
-app.get(["/", "/health"], (req, res) => {
-  const healthData = getHealthData();
-  const statusCode = healthData.status === "healthy" ? 200 : 503;
-  res.status(statusCode).json(healthData);
+  console.log(
+    getTimestamp(),
+    chalk.magenta("📋 HEADERS:"),
+    JSON.stringify(relevantHeaders, null, 2)
+  );
+
+  // Capturar a resposta para logging
+  const originalSend = res.send;
+  const originalJson = res.json;
+
+  let responseBody: any;
+
+  res.send = function (body: any): any {
+    responseBody = body;
+    return originalSend.call(this, body);
+  };
+
+  res.json = function (body: any): any {
+    responseBody = body;
+    return originalJson.call(this, body);
+  };
+
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    const statusIcon = res.statusCode >= 400 ? "❌" : "✅";
+    const statusColor = res.statusCode >= 400 ? chalk.red : chalk.green;
+
+    console.log(
+      getTimestamp(),
+      statusColor(statusIcon),
+      req.method,
+      req.path,
+      res.statusCode,
+      chalk.magenta(`${duration}ms`)
+    );
+
+    // ✅ IMPRIMIR RESPOSTA (se não for muito grande)
+    if (responseBody && duration > 50) {
+      try {
+        const responseStr =
+          typeof responseBody === "string"
+            ? responseBody
+            : JSON.stringify(responseBody);
+
+        if (responseStr.length < 500) {
+          console.log(getTimestamp(), chalk.green("📤 RESPOSTA:"), responseStr);
+        } else {
+          console.log(
+            getTimestamp(),
+            chalk.green("📤 RESPOSTA:"),
+            responseStr.substring(0, 200) + "..."
+          );
+        }
+      } catch (e) {
+        console.log(
+          getTimestamp(),
+          chalk.green("📤 RESPOSTA:"),
+          "[NÃO PODE SER SERIALIZADO]"
+        );
+      }
+    }
+
+    // ✅ LOG ESPECIAL PARA REQUISIÇÕES LENTAS
+    if (duration > 1000) {
+      console.log(
+        getTimestamp(),
+        chalk.red("🐌 REQUISIÇÃO LENTA:"),
+        `${duration}ms`
+      );
+    }
+  });
+
+  next();
 });
 
-// 9. ✅ TRATAMENTO DE ERROS
-app.use(notFoundHandler);
-app.use(handleError);
+// ✅ 7. ROTAS (ÚLTIMO)
+app.use(userServiceRoutes);
+
+// =============================================
+// 🏠 ROTAS DO USER SERVICE
+// =============================================
+
+// ✅ HEALTH CHECK
+app.get("/health", (req, res) => {
+  res.json({
+    status: "OK",
+    service: "User Service",
+    timestamp: new Date().toISOString(),
+    version: "2.2.0",
+    body_parsing: "FIXED", // 🆕 NOVO
+  });
+});
+
+// ✅ ROTA RAIZ
+app.get("/", (req, res) => {
+  res.json({
+    message: "👥 User Service",
+    status: "running",
+    timestamp: new Date().toISOString(),
+    version: "2.2.0",
+    body_parsing: "CORRECT_ORDER", // 🆕 NOVO
+  });
+});
+
+// ✅ 404 HANDLER
+app.use((req, res) => {
+  res.status(404).json({
+    statusCode: 404,
+    message: "Endpoint não encontrado",
+    path: req.path,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// No server.ts do User Service, antes das rotas
+app.use((req, res, next) => {
+  console.log(`📍 [USER SERVICE ROUTE] ${req.method} ${req.path}`);
+  next();
+});
 
 export default app;

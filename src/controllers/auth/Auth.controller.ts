@@ -1,12 +1,69 @@
-import { Request, Response } from "express";
+// AUTH-USERS-SERVICE/src/controllers/auth/Auth.controller.ts
+import { Request, Response, NextFunction } from "express";
 import { AuthService } from "../../services/auth/Auth.service";
+import { ClientController } from "../user/client/Client.controller";
+import { EmployeeController } from "../user/employee/Employee.controller";
+import { AdminController } from "../user/admin/Admin.controller";
+import { UserMainRole } from "../../models/interfaces/user.roles";
 
 export class AuthController {
   private authService: AuthService;
+  private clientController: ClientController;
+  private employeeController: EmployeeController;
+  private adminController: AdminController;
 
   constructor() {
     this.authService = new AuthService();
+    this.clientController = new ClientController();
+    this.employeeController = new EmployeeController();
+    this.adminController = new AdminController();
   }
+
+  // 🎯 ORQUESTRAÇÃO DE REGISTRO POR ROLE
+  public startRegistration = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { role, email, subRole, ...otherData } = req.body;
+
+      console.log(
+        `🎯 [AuthController] Iniciando registro para: ${email}, role: ${role}, subRole: ${subRole}`
+      );
+
+      // ✅ ORQUESTRAÇÃO POR ROLE
+      switch (role) {
+        case UserMainRole.CLIENT:
+          return this.clientController.startRegistration(req, res, next);
+        case UserMainRole.EMPLOYEE:
+          // ✅ VALIDAR SUBROLE PARA EMPLOYEE
+          if (!subRole) {
+            return res.status(400).json({
+              success: false,
+              error: "subRole é obrigatório para employees",
+              code: "MISSING_SUBROLE",
+            });
+          }
+          return this.employeeController.startRegistration(req, res, next);
+        case UserMainRole.ADMINSYSTEM:
+          return this.adminController.startRegistration(req, res, next);
+        default:
+          return res.status(400).json({
+            success: false,
+            error: "Tipo de usuário não suportado",
+            code: "INVALID_ROLE",
+          });
+      }
+    } catch (error) {
+      console.error("[AuthController] Erro no start registration:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Erro interno no servidor",
+        code: "INTERNAL_ERROR",
+      });
+    }
+  };
 
   // ✅ LOGIN
   public login = async (req: Request, res: Response) => {
@@ -161,63 +218,6 @@ export class AuthController {
     }
   };
 
-  // ✅ SEND VERIFICATION (OTP)
-  public sendVerification = async (req: Request, res: Response) => {
-    try {
-      const { email, name } = req.body;
-
-      const result = await this.authService.sendVerification(email, name);
-
-      return res.status(result.statusCode || 200).json(result);
-    } catch (error) {
-      console.error("[AuthController] Erro no envio de verificação:", error);
-      return res.status(500).json({
-        success: false,
-        error: "Erro interno no servidor",
-        code: "INTERNAL_ERROR",
-      });
-    }
-  };
-
-  // ✅ VERIFY ACCOUNT (OTP)
-  public verifyAccount = async (req: Request, res: Response) => {
-    try {
-      const { email, code } = req.body;
-
-      const result = await this.authService.verifyAccount(email, code);
-
-      return res.status(result.statusCode || 200).json(result);
-    } catch (error) {
-      console.error("[AuthController] Erro na verificação de conta:", error);
-      return res.status(500).json({
-        success: false,
-        error: "Erro interno no servidor",
-        code: "INTERNAL_ERROR",
-      });
-    }
-  };
-
-  // ✅ GET SESSION
-  public getSession = async (req: Request, res: Response) => {
-    try {
-      const { sessionId } = req.body;
-
-      // Implementar lógica para buscar sessão específica
-      return res.status(501).json({
-        success: false,
-        error: "Método não implementado",
-        code: "NOT_IMPLEMENTED",
-      });
-    } catch (error) {
-      console.error("[AuthController] Erro ao buscar sessão:", error);
-      return res.status(500).json({
-        success: false,
-        error: "Erro interno no servidor",
-        code: "INTERNAL_ERROR",
-      });
-    }
-  };
-
   // ✅ GET ACTIVE SESSIONS
   public getActiveSessions = async (req: Request, res: Response) => {
     try {
@@ -272,32 +272,6 @@ export class AuthController {
       return res.status(result.statusCode || 200).json(result);
     } catch (error) {
       console.error("[AuthController] Erro ao revogar sessão:", error);
-      return res.status(500).json({
-        success: false,
-        error: "Erro interno no servidor",
-        code: "INTERNAL_ERROR",
-      });
-    }
-  };
-
-  // ✅ CHECK EMAIL AVAILABILITY (NOVO MÉTODO)
-  public checkEmailAvailability = async (req: Request, res: Response) => {
-    try {
-      const { email } = req.body;
-
-      if (!email) {
-        return res.status(400).json({
-          success: false,
-          error: "Email é obrigatório",
-          code: "MISSING_EMAIL",
-        });
-      }
-
-      const result = await this.authService.checkEmailAvailability(email);
-
-      return res.status(result.statusCode || 200).json(result);
-    } catch (error) {
-      console.error("[AuthController] Erro ao verificar email:", error);
       return res.status(500).json({
         success: false,
         error: "Erro interno no servidor",
