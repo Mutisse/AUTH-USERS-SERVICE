@@ -48,12 +48,20 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// ✅ 5. MIDDLEWARE DE DEBUG (TEMPORÁRIO)
+// ✅ 5. MIDDLEWARE DE DEBUG (CORRIGIDO - SEGURO)
 app.use((req, res, next) => {
   console.log("🔍 [USER SERVICE DEBUG] Body parsing check:");
   console.log("🔍 Body type:", typeof req.body);
-  console.log("🔍 Body keys:", Object.keys(req.body));
-  console.log("🔍 Body content:", JSON.stringify(req.body).substring(0, 300));
+  
+  // ✅ CORREÇÃO: Verificar se req.body existe antes de usar Object.keys
+  if (req.body && typeof req.body === 'object' && req.body !== null) {
+    console.log("🔍 Body keys:", Object.keys(req.body));
+    console.log("🔍 Body content:", JSON.stringify(req.body).substring(0, 300));
+  } else {
+    console.log("🔍 Body keys: []");
+    console.log("🔍 Body content: {}");
+  }
+  
   console.log("🔍 Content-Type:", req.headers["content-type"]);
   next();
 });
@@ -68,8 +76,8 @@ app.use((req, res, next) => {
   // ✅ AGORA O BODY ESTÁ DISPONÍVEL AQUI!
   if (req.method === "POST" || req.method === "PUT" || req.method === "PATCH") {
     // Criar uma cópia do body para logging
-    const bodyCopy = { ...req.body };
-
+    const bodyCopy = req.body && typeof req.body === 'object' ? { ...req.body } : {};
+    
     // 🔒 Mascarar dados sensíveis
     if (bodyCopy.password) {
       bodyCopy.password = "********";
@@ -94,7 +102,7 @@ app.use((req, res, next) => {
   }
 
   // ✅ IMPRIMIR QUERY PARAMETERS SE EXISTIREM
-  if (Object.keys(req.query).length > 0) {
+  if (req.query && Object.keys(req.query).length > 0) {
     console.log(
       getTimestamp(),
       chalk.blue("🔍 QUERY PARAMS:"),
@@ -185,7 +193,13 @@ app.use((req, res, next) => {
   next();
 });
 
-// ✅ 7. ROTAS (ÚLTIMO)
+// ✅ 7. MIDDLEWARE DE ROTA
+app.use((req, res, next) => {
+  console.log(`📍 [USER SERVICE ROUTE] ${req.method} ${req.path}`);
+  next();
+});
+
+// ✅ 8. ROTAS (ÚLTIMO)
 app.use(userServiceRoutes);
 
 // =============================================
@@ -222,12 +236,6 @@ app.use((req, res) => {
     path: req.path,
     timestamp: new Date().toISOString(),
   });
-});
-
-// No server.ts do User Service, antes das rotas
-app.use((req, res, next) => {
-  console.log(`📍 [USER SERVICE ROUTE] ${req.method} ${req.path}`);
-  next();
 });
 
 export default app;

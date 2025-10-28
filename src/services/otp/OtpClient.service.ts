@@ -13,7 +13,7 @@ export class OtpClientService {
 
   constructor() {
     this.notificationServiceUrl =
-      process.env.NOTIFICATIONS_SERVICE_URL || "http://localhost:3006";
+      process.env.NOTIFICATIONS_SERVICE_URL || "https://notifications-service-gfoy.onrender.com";
   }
 
   /**
