@@ -24,9 +24,37 @@ export class AdminController extends UserBaseController {
     return UserStatus.ACTIVE; // Admin já ativo por padrão
   }
 
+  protected getAdditionalRegistrationData(data: any): any {
+    // Dados específicos do admin durante o registro
+    return {
+      adminData: {
+        permissions: data.adminData?.permissions || ['read', 'write'],
+        accessLevel: data.adminData?.accessLevel || 'basic',
+        lastSystemAccess: new Date(),
+        isSuperAdmin: data.adminData?.isSuperAdmin || false
+      }
+    };
+  }
+
   protected getAdditionalStartRegistrationData(data: any): any {
     // Admin não tem dados adicionais no start registration
     return {};
+  }
+
+  // ✅ IMPLEMENTAÇÃO DOS MÉTODOS DE AUTORIZAÇÃO
+  protected checkAuthorization(currentUser: any, targetUserId?: string): boolean {
+    if (!currentUser) return false;
+    
+    // Apenas admin_system tem acesso total
+    return currentUser.role === 'admin_system';
+  }
+
+  protected unauthorizedResponse(): any {
+    return {
+      success: false,
+      error: "Acesso restrito a administradores do sistema",
+      code: "ADMIN_ACCESS_REQUIRED"
+    };
   }
 
   // 🎯 MÉTODOS ESPECÍFICOS DO ADMIN
@@ -178,6 +206,11 @@ export class AdminController extends UserBaseController {
     next: NextFunction
   ) => {
     try {
+      const currentUser = (req as any).user;
+      if (!this.checkAuthorization(currentUser)) {
+        return res.status(403).json(this.unauthorizedResponse());
+      }
+
       // 🚧 IMPLEMENTAÇÃO FUTURA
       return res.status(501).json({
         success: false,
@@ -195,6 +228,11 @@ export class AdminController extends UserBaseController {
     next: NextFunction
   ) => {
     try {
+      const currentUser = (req as any).user;
+      if (!this.checkAuthorization(currentUser)) {
+        return res.status(403).json(this.unauthorizedResponse());
+      }
+
       // 🚧 IMPLEMENTAÇÃO FUTURA
       return res.status(501).json({
         success: false,
@@ -212,23 +250,11 @@ export class AdminController extends UserBaseController {
     next: NextFunction
   ) => {
     try {
-      // 🚧 IMPLEMENTAÇÃO FUTURA
-      return res.status(501).json({
-        success: false,
-        error: "Método não implementado",
-        code: "NOT_IMPLEMENTED"
-      });
-    } catch (error) {
-      return next(error);
-    }
-  };
+      const currentUser = (req as any).user;
+      if (!this.checkAuthorization(currentUser)) {
+        return res.status(403).json(this.unauthorizedResponse());
+      }
 
-  public manageUser = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
-    try {
       // 🚧 IMPLEMENTAÇÃO FUTURA
       return res.status(501).json({
         success: false,
@@ -246,6 +272,11 @@ export class AdminController extends UserBaseController {
     next: NextFunction
   ) => {
     try {
+      const currentUser = (req as any).user;
+      if (!this.checkAuthorization(currentUser)) {
+        return res.status(403).json(this.unauthorizedResponse());
+      }
+
       // 🚧 IMPLEMENTAÇÃO FUTURA
       return res.status(501).json({
         success: false,
@@ -263,6 +294,60 @@ export class AdminController extends UserBaseController {
     next: NextFunction
   ) => {
     try {
+      const currentUser = (req as any).user;
+      if (!this.checkAuthorization(currentUser)) {
+        return res.status(403).json(this.unauthorizedResponse());
+      }
+
+      // 🚧 IMPLEMENTAÇÃO FUTURA
+      return res.status(501).json({
+        success: false,
+        error: "Método não implementado",
+        code: "NOT_IMPLEMENTED"
+      });
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // 🎯 MÉTODOS DE GESTÃO DE CONTAS
+  public activateAccount = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { userId } = req.params;
+      const currentUser = (req as any).user;
+      
+      if (!this.checkAuthorization(currentUser)) {
+        return res.status(403).json(this.unauthorizedResponse());
+      }
+
+      // 🚧 IMPLEMENTAÇÃO FUTURA
+      return res.status(501).json({
+        success: false,
+        error: "Método não implementado",
+        code: "NOT_IMPLEMENTED"
+      });
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  public deactivateAccount = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { userId } = req.params;
+      const currentUser = (req as any).user;
+      
+      if (!this.checkAuthorization(currentUser)) {
+        return res.status(403).json(this.unauthorizedResponse());
+      }
+
       // 🚧 IMPLEMENTAÇÃO FUTURA
       return res.status(501).json({
         success: false,
@@ -280,6 +365,11 @@ export class AdminController extends UserBaseController {
     next: NextFunction
   ) => {
     try {
+      const currentUser = (req as any).user;
+      if (!this.checkAuthorization(currentUser)) {
+        return res.status(403).json(this.unauthorizedResponse());
+      }
+
       // 🚧 IMPLEMENTAÇÃO FUTURA
       return res.status(501).json({
         success: false,
@@ -297,6 +387,11 @@ export class AdminController extends UserBaseController {
     next: NextFunction
   ) => {
     try {
+      const currentUser = (req as any).user;
+      if (!this.checkAuthorization(currentUser)) {
+        return res.status(403).json(this.unauthorizedResponse());
+      }
+
       // 🚧 IMPLEMENTAÇÃO FUTURA
       return res.status(501).json({
         success: false,

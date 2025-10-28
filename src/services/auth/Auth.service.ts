@@ -3,7 +3,8 @@ import { ClientModel } from "../../models/user/client/Client.model";
 import { EmployeeModel } from "../../models/user/employee/Employee.model";
 import { AdminModel } from "../../models/user/admin/Admin.model";
 import { SessionService } from "../session/Session.service";
-import { RegistrationCleanupUtil } from "../../utils/RegistrationCleanupUtil"; // ✅ NOVO IMPORT
+import { RegistrationCleanupUtil } from "../../utils/RegistrationCleanupUtil";
+import { OtpClientService } from "../otp/OtpClient.service"; // ✅ NOVO IMPORT
 
 import {
   generateTokenPair,
@@ -14,12 +15,14 @@ import {
 
 export class AuthService {
   private sessionService: SessionService;
-  private cleanupUtil: RegistrationCleanupUtil; // ✅ NOVA PROPRIEDADE
+  private cleanupUtil: RegistrationCleanupUtil;
+  private otpClient: OtpClientService; // ✅ NOVA PROPRIEDADE
 
   constructor() {
     this.sessionService = new SessionService();
-    this.cleanupUtil = new RegistrationCleanupUtil(ClientModel); // ✅ INICIALIZAR CLEANUP
-    this.cleanupUtil.startScheduledCleanup(); // ✅ INICIAR AGENDAMENTO AUTOMÁTICO
+    this.cleanupUtil = new RegistrationCleanupUtil(ClientModel);
+    this.cleanupUtil.startScheduledCleanup();
+    this.otpClient = new OtpClientService(); // ✅ INICIALIZAR OTP CLIENT
   }
 
   // ✅ MÉTODO ADICIONADO: ENVIAR VERIFICAÇÃO (SEM OTP - APENAS VERIFICA EMAIL)
@@ -290,7 +293,7 @@ export class AuthService {
     }
   }
 
-  // 🎯 REDEFINIR SENHA - CORRIGIDO (SEM OTP - APENAS ATUALIZA SENHA)
+  // 🎯 REDEFINIR SENHA - AGORA COM VERIFICAÇÃO DE OTP
   public async resetPassword(email: string, code: string, newPassword: string) {
     try {
       if (newPassword.length < 6) {
@@ -302,11 +305,29 @@ export class AuthService {
         };
       }
 
-      // ✅ CORREÇÃO: OTP SERÁ VERIFICADO PELO GATEWAY/NOTIFICATIONS SERVICE
+      // ✅ AGORA VERIFICAMOS O OTP ANTES DE REDEFINIR
       console.log(
-        `[AuthService] Redefinindo senha para: ${email}, código: ${code}`
+        `[AuthService] Verificando OTP para: ${email}, código: ${code}`
       );
-      // O gateway já deve ter verificado o OTP antes de chamar este método
+
+      const otpResult = await this.otpClient.verifyPasswordRecoveryOTP(
+        email,
+        code
+      );
+
+      if (!otpResult.success) {
+        return {
+          success: false,
+          error:
+            otpResult.message || "Código de verificação inválido ou expirado",
+          code: "INVALID_OTP",
+          statusCode: 400,
+        };
+      }
+
+      console.log(
+        `✅ [AuthService] OTP verificado - Redefinindo senha para: ${email}`
+      );
 
       // Buscar usuário em todos os modelos
       const [client, employee, admin] = await Promise.all([
@@ -420,7 +441,7 @@ export class AuthService {
     }
   }
 
-  // 🎯 ESQUECI MINHA SENHA - CORRIGIDO (SEM ENVIAR OTP - APENAS VERIFICA EMAIL)
+  // 🎯 ESQUECI MINHA SENHA - AGORA COM ENVIO DE OTP
   public async forgotPassword(email: string) {
     try {
       if (!email) {
@@ -443,41 +464,88 @@ export class AuthService {
 
       if (!user) {
         // Por segurança, retornar sucesso mesmo se o email não existir
+        console.log(
+          `📧 [AuthService] Email não encontrado: ${email} - Retornando resposta segura`
+        );
         return {
           success: true,
           message:
             "Se o email existir em nosso sistema, você receberá um código de recuperação",
           data: {
-            emailExists: false, // Não revelar se o email existe ou não
-            requiresOtp: true, // ✅ INDICA QUE O GATEWAY DEVE ENVIAR OTP
+            emailExists: false,
+            requiresOtp: true,
           },
           statusCode: 200,
         };
       }
 
-      // ✅ CORREÇÃO: APENAS INDICA QUE O GATEWAY DEVE ENVIAR OTP
+      // ✅ AGORA ENVIAMOS O OTP PARA RECUPERAÇÃO DE SENHA
+      const userId = (user as any)._id.toString();
+      const userName =
+        (user as any).fullName?.displayName || (user as any).name || email;
+
       console.log(
-        `📧 [AuthService] Email existe: ${email} - OTP será enviado pelo Gateway`
+        `📧 [AuthService] Usuário encontrado: ${email} - Enviando OTP de recuperação...`
       );
+
+      const otpResult = await this.otpClient.sendPasswordRecoveryOTP(
+        email,
+        userName
+      );
+
+      if (!otpResult.success) {
+        console.warn(
+          `⚠️ [AuthService] OTP não enviado para ${email}: ${otpResult.message}`
+        );
+
+        // Mesmo se OTP falhar, retornamos sucesso por segurança
+        return {
+          success: true,
+          message:
+            "Solicitação processada. Verifique seu email para o código de recuperação",
+          data: {
+            email,
+            emailExists: true,
+            requiresOtp: true,
+            purpose: "reset-password",
+            otpSent: false,
+            fallback: true,
+          },
+          statusCode: 200,
+        };
+      }
+
+      console.log(`✅ [AuthService] OTP enviado com sucesso para: ${email}`);
 
       return {
         success: true,
-        message: "Código de recuperação será enviado para seu email",
+        message: "Código de recuperação enviado para seu email",
         data: {
           email,
           emailExists: true,
-          requiresOtp: true, // ✅ INDICA QUE O GATEWAY DEVE ENVIAR OTP
+          requiresOtp: true,
           purpose: "reset-password",
+          otpSent: true,
         },
         statusCode: 200,
       };
     } catch (error) {
       console.error("[AuthService] Erro no forgot password:", error);
+
+      // Fallback em caso de erro
       return {
-        success: false,
-        error: "Erro ao processar solicitação de recuperação",
-        code: "FORGOT_PASSWORD_ERROR",
-        statusCode: 500,
+        success: true,
+        message:
+          "Solicitação processada. Verifique seu email para o código de recuperação",
+        data: {
+          email,
+          emailExists: true,
+          requiresOtp: true,
+          purpose: "reset-password",
+          otpSent: false,
+          fallback: true,
+        },
+        statusCode: 200,
       };
     }
   }

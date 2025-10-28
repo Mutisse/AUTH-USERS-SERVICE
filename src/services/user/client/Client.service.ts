@@ -5,7 +5,7 @@ import {
   UserMainRole,
   UserStatus,
 } from "../../../models/interfaces/user.roles";
-import generateCustomUserId from "../../../utils/generateCustomUserId";
+import { generateUserId } from "../../../utils/generateCustomUserId";
 
 export class ClientService extends UserBaseService {
   protected userModel = ClientModel;
@@ -72,7 +72,7 @@ export class ClientService extends UserBaseService {
       }
 
       // 🎯 GERAR ID E HASH PASSWORD
-      const clientId = generateCustomUserId(UserMainRole.CLIENT);
+      const clientId = generateUserId();
       const hashedPassword = await bcrypt.hash(clientData.password, 12);
 
       // 🎯 CRIAR CLIENTE

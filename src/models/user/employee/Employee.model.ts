@@ -15,7 +15,8 @@ const EmployeeSchema = new Schema<EmployeeUser>(
       professionalTitle: { 
         type: String, 
         required: true, 
-        trim: true 
+        trim: true,
+        default: "Profissional de Beleza"
       },
       specialization: [{ 
         type: String, 
@@ -23,7 +24,8 @@ const EmployeeSchema = new Schema<EmployeeUser>(
       }],
       bio: { 
         type: String, 
-        maxlength: 500 
+        maxlength: 500,
+        default: ""
       },
       experienceYears: { 
         type: Number, 

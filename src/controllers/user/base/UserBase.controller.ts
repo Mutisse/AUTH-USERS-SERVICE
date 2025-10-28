@@ -1,8 +1,8 @@
 // AUTH-USERS-SERVICE/src/controllers/user/base/UserBase.controller.ts
 import { Request, Response, NextFunction } from "express";
-import axios from "axios";
 import { EmailVerificationService } from "../../../services/verificy/email/EmailVerification.service";
 import { RegistrationCleanupService } from "../../../services/verificy/cleanup/RegistrationCleanup.service";
+import { OtpClientService } from "../../../services/otp/OtpClient.service";
 import { AppError } from "../../../utils/AppError";
 import { UserStatus } from "../../../models/interfaces/user.roles";
 import {
@@ -17,10 +17,12 @@ export abstract class UserBaseController {
   protected abstract flowType: string;
   protected cleanupService: RegistrationCleanupService;
   protected emailService: EmailVerificationService;
+  protected otpClient: OtpClientService;
 
   constructor() {
     this.cleanupService = new RegistrationCleanupService();
     this.emailService = new EmailVerificationService();
+    this.otpClient = new OtpClientService();
   }
 
   // ✅ MÉTODO ÚNICO para transformar dados
@@ -44,37 +46,56 @@ export abstract class UserBaseController {
     return transformed;
   }
 
-  // ✅ MÉTODO CORRIGIDO - USAR INTERFACE OTPResponse
+  // ✅ MÉTODO ATUALIZADO - AGORA USA O SERVIÇO UNIFICADO
   private async callOTPService(
     endpoint: string,
     data: any
   ): Promise<OTPResponse> {
-    const notificationServiceUrl =
-      process.env.NOTIFICATIONS_SERVICE_URL || "http://localhost:3006";
-
-    console.log(`📞 [OTP CALL] ${endpoint} para: ${data.email}`);
+    console.log(`📞 [UserBase OTP] ${endpoint} para: ${data.email}`);
 
     try {
-      const response = await axios({
-        method: endpoint === "status" ? "GET" : "POST",
-        url:
-          endpoint === "status"
-            ? `${notificationServiceUrl}/otp/status/${data.email}`
-            : `${notificationServiceUrl}/otp/${endpoint}`,
-        data: endpoint !== "status" ? data : undefined,
-        timeout: 8000,
-        headers: { "Content-Type": "application/json" },
-      });
+      switch (endpoint) {
+        case "send":
+          if (data.purpose === "password-recovery") {
+            return await this.otpClient.sendPasswordRecoveryOTP(
+              data.email,
+              data.name
+            );
+          } else {
+            return await this.otpClient.sendRegistrationOTP(
+              data.email,
+              data.name
+            );
+          }
 
-      return {
-        success: Boolean(response.data?.success),
-        message: response.data?.message || "",
-        data: response.data?.data || {},
-        retryAfter: response.data?.retryAfter,
-      };
+        case "verify":
+          if (data.purpose === "password-recovery") {
+            return await this.otpClient.verifyPasswordRecoveryOTP(
+              data.email,
+              data.code
+            );
+          } else {
+            return await this.otpClient.verifyRegistrationOTP(
+              data.email,
+              data.code
+            );
+          }
+
+        case "resend":
+          return await this.otpClient.resendOTP(data.email, data.name);
+
+        case "status":
+          return await this.otpClient.getOTPStatus(data.email);
+
+        default:
+          return {
+            success: false,
+            message: "Endpoint OTP não suportado",
+            data: {},
+          };
+      }
     } catch (error) {
-      console.error(`❌ [OTP CALL] Erro em ${endpoint}:`, error);
-
+      console.error(`❌ [UserBase OTP] Erro em ${endpoint}:`, error);
       return {
         success: false,
         message: "Serviço de OTP indisponível",
@@ -84,7 +105,7 @@ export abstract class UserBaseController {
   }
 
   // ✅ MÉTODO ÚNICO para respostas - USAR INTERFACE ApiResponse
-  private apiResponse(
+  protected apiResponse(
     success: boolean,
     message: string,
     data: any = {},
@@ -141,12 +162,17 @@ export abstract class UserBaseController {
     }
   }
 
-  // 1. ✅ REGISTRO E OTP
-  public startRegistration = async (
+  // ✅ MÉTODO PARA DADOS ADICIONAIS DE START REGISTRATION
+  protected getAdditionalStartRegistrationData(data: any): any {
+    return {};
+  }
+
+  // 1. ✅ REGISTRO E OTP - MÉTODO TRADICIONAL (para permitir super)
+  public async startRegistration(
     req: Request,
     res: Response,
     next: NextFunction
-  ) => {
+  ): Promise<Response> {
     try {
       const { email, firstName, lastName, password, acceptTerms } = req.body;
 
@@ -248,6 +274,7 @@ export abstract class UserBaseController {
           );
       }
 
+      // ✅ AGORA USA O SERVIÇO UNIFICADO DE OTP
       const otpResult = await this.callOTPService("send", {
         email,
         purpose: "registration",
@@ -278,7 +305,7 @@ export abstract class UserBaseController {
           userStatus: emailExists ? "INACTIVE_USER" : "NEW_USER",
           requiresOtp: true,
           flowType: this.flowType,
-          ...this.getAdditionalRegistrationData(req.body),
+          ...this.getAdditionalStartRegistrationData(req.body),
         })
       );
     } catch (error: any) {
@@ -295,14 +322,14 @@ export abstract class UserBaseController {
             userStatus: "NEW_USER",
             requiresOtp: false,
             flowType: `${this.userType}_direct`,
-            ...this.getAdditionalRegistrationData(req.body),
+            ...this.getAdditionalStartRegistrationData(req.body),
           }
         )
       );
     }
-  };
+  }
 
-  // 2. ✅ VERIFICAR OTP
+  // 2. ✅ VERIFICAR OTP - AGORA USA SERVIÇO UNIFICADO
   public verifyOtp = async (
     req: Request,
     res: Response,
@@ -325,6 +352,7 @@ export abstract class UserBaseController {
           );
       }
 
+      // ✅ AGORA USA O SERVIÇO UNIFICADO DE OTP
       const result = await this.callOTPService("verify", {
         email,
         code,
@@ -359,7 +387,7 @@ export abstract class UserBaseController {
     }
   };
 
-  // 3. ✅ REENVIAR OTP
+  // 3. ✅ REENVIAR OTP - AGORA USA SERVIÇO UNIFICADO
   public resendOtp = async (
     req: Request,
     res: Response,
@@ -382,6 +410,7 @@ export abstract class UserBaseController {
           );
       }
 
+      // ✅ AGORA USA O SERVIÇO UNIFICADO DE OTP
       const result = await this.callOTPService("resend", { email, name });
 
       const resendSuccess = Boolean(result.success);
@@ -408,7 +437,7 @@ export abstract class UserBaseController {
     }
   };
 
-  // 4. ✅ STATUS DO OTP
+  // 4. ✅ STATUS DO OTP - AGORA USA SERVIÇO UNIFICADO
   public getOtpStatus = async (
     req: Request,
     res: Response,
@@ -431,6 +460,7 @@ export abstract class UserBaseController {
           );
       }
 
+      // ✅ AGORA USA O SERVIÇO UNIFICADO DE OTP
       const result = await this.callOTPService("status", { email });
 
       return res.json(
@@ -721,7 +751,438 @@ export abstract class UserBaseController {
     }
   };
 
-  // ✅ MÉTODOS ABSTRATOS
+  // 12. ✅ BUSCAR USUÁRIO POR ID
+  public getUserById = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { userId } = req.params;
+      const currentUser = (req as any).user;
+
+      if (!currentUser) {
+        throw new AppError("Não autenticado", 401, "UNAUTHENTICATED");
+      }
+
+      if (!this.isAuthorized(currentUser, userId)) {
+        return res
+          .status(403)
+          .json(
+            this.apiResponse(false, "Não autorizado", {}, "UNAUTHORIZED", 403)
+          );
+      }
+
+      const result = await this.userService.getUserById(userId);
+
+      const getSuccess = Boolean(result.success);
+
+      if (!getSuccess) {
+        return res.status(result.statusCode || 404).json(result);
+      }
+
+      return res.json(
+        this.apiResponse(true, "Usuário encontrado com sucesso!", result.data)
+      );
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // 13. ✅ LISTAR USUÁRIOS (ADMIN)
+  public listUsers = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { page = 1, limit = 10, search, status } = req.query;
+      const currentUser = (req as any).user;
+
+      if (!currentUser) {
+        throw new AppError("Não autenticado", 401, "UNAUTHENTICATED");
+      }
+
+      if (!this.isAuthorized(currentUser)) {
+        return res
+          .status(403)
+          .json(
+            this.apiResponse(false, "Não autorizado", {}, "UNAUTHORIZED", 403)
+          );
+      }
+
+      const result = await this.userService.listUsers({
+        page: Number(page),
+        limit: Number(limit),
+        search: search as string,
+        status: status as string,
+      });
+
+      return res.json(
+        this.apiResponse(true, "Usuários listados com sucesso!", result.data)
+      );
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // 14. ✅ ATUALIZAR STATUS DO USUÁRIO (ADMIN)
+  public updateUserStatus = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { userId } = req.params;
+      const { status } = req.body;
+      const currentUser = (req as any).user;
+
+      if (!currentUser) {
+        throw new AppError("Não autenticado", 401, "UNAUTHENTICATED");
+      }
+
+      if (!this.isAuthorized(currentUser)) {
+        return res
+          .status(403)
+          .json(
+            this.apiResponse(false, "Não autorizado", {}, "UNAUTHORIZED", 403)
+          );
+      }
+
+      const result = await this.userService.updateUserStatus(userId, status);
+
+      const updateSuccess = Boolean(result.success);
+
+      if (!updateSuccess) {
+        return res.status(result.statusCode || 400).json(result);
+      }
+
+      return res.json(
+        this.apiResponse(true, "Status atualizado com sucesso!", result.data)
+      );
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // 15. ✅ EXCLUIR USUÁRIO (SOFT DELETE)
+  public deleteUser = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { userId } = req.params;
+      const currentUser = (req as any).user;
+      const deletedBy = currentUser?.id;
+
+      if (!currentUser) {
+        throw new AppError("Não autenticado", 401, "UNAUTHENTICATED");
+      }
+
+      if (!this.isAuthorized(currentUser, userId)) {
+        return res
+          .status(403)
+          .json(
+            this.apiResponse(false, "Não autorizado", {}, "UNAUTHORIZED", 403)
+          );
+      }
+
+      const result = await this.userService.softDeleteUser(userId, deletedBy);
+
+      const deleteSuccess = Boolean(result.success);
+
+      if (!deleteSuccess) {
+        return res.status(result.statusCode || 400).json(result);
+      }
+
+      return res.json(
+        this.apiResponse(true, "Usuário excluído com sucesso!", result.data)
+      );
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // 16. ✅ RESTAURAR USUÁRIO
+  public restoreUser = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { userId } = req.params;
+      const currentUser = (req as any).user;
+
+      if (!currentUser) {
+        throw new AppError("Não autenticado", 401, "UNAUTHENTICATED");
+      }
+
+      if (!this.isAuthorized(currentUser)) {
+        return res
+          .status(403)
+          .json(
+            this.apiResponse(false, "Não autorizado", {}, "UNAUTHORIZED", 403)
+          );
+      }
+
+      const result = await this.userService.restoreUser(userId);
+
+      const restoreSuccess = Boolean(result.success);
+
+      if (!restoreSuccess) {
+        return res.status(result.statusCode || 400).json(result);
+      }
+
+      return res.json(
+        this.apiResponse(true, "Usuário restaurado com sucesso!", result.data)
+      );
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // 17. ✅ EXCLUSÃO PERMANENTE (HARD DELETE)
+  public hardDeleteUser = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { userId } = req.params;
+      const currentUser = (req as any).user;
+
+      if (!currentUser) {
+        throw new AppError("Não autenticado", 401, "UNAUTHENTICATED");
+      }
+
+      if (!this.isAuthorized(currentUser)) {
+        return res
+          .status(403)
+          .json(
+            this.apiResponse(false, "Não autorizado", {}, "UNAUTHORIZED", 403)
+          );
+      }
+
+      const result = await this.userService.hardDeleteUser(userId);
+
+      const deleteSuccess = Boolean(result.success);
+
+      if (!deleteSuccess) {
+        return res.status(result.statusCode || 400).json(result);
+      }
+
+      return res.json(
+        this.apiResponse(true, "Usuário excluído permanentemente!", result.data)
+      );
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // 18. ✅ ATUALIZAR SENHA
+  public updatePassword = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const userId = (req as any).user?.id;
+      const { currentPassword, newPassword } = req.body;
+
+      if (!userId) {
+        throw new AppError("Não autenticado", 401, "UNAUTHENTICATED");
+      }
+
+      if (!currentPassword || !newPassword) {
+        return res
+          .status(400)
+          .json(
+            this.apiResponse(
+              false,
+              "Senha atual e nova senha são obrigatórias",
+              {},
+              "MISSING_PASSWORDS",
+              400
+            )
+          );
+      }
+
+      const result = await this.userService.updatePassword(
+        userId,
+        currentPassword,
+        newPassword
+      );
+
+      const updateSuccess = Boolean(result.success);
+
+      if (!updateSuccess) {
+        return res.status(result.statusCode || 400).json(result);
+      }
+
+      return res.json(
+        this.apiResponse(true, "Senha atualizada com sucesso!", result.data)
+      );
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // 19. ✅ RESETAR SENHA (SOLICITAÇÃO)
+  public requestPasswordReset = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { email } = req.body;
+
+      if (!email) {
+        return res
+          .status(400)
+          .json(
+            this.apiResponse(
+              false,
+              "Email é obrigatório",
+              {},
+              "MISSING_EMAIL",
+              400
+            )
+          );
+      }
+
+      const result = await this.userService.requestPasswordReset(email);
+
+      const requestSuccess = Boolean(result.success);
+
+      if (!requestSuccess) {
+        return res.status(result.statusCode || 400).json(result);
+      }
+
+      return res.json(
+        this.apiResponse(
+          true,
+          "Instruções enviadas para seu email",
+          result.data
+        )
+      );
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // 20. ✅ RESETAR SENHA (CONFIRMAÇÃO)
+  public resetPassword = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { token, newPassword } = req.body;
+
+      if (!token || !newPassword) {
+        return res
+          .status(400)
+          .json(
+            this.apiResponse(
+              false,
+              "Token e nova senha são obrigatórios",
+              {},
+              "MISSING_RESET_DATA",
+              400
+            )
+          );
+      }
+
+      const result = await this.userService.resetPassword(token, newPassword);
+
+      const resetSuccess = Boolean(result.success);
+
+      if (!resetSuccess) {
+        return res.status(result.statusCode || 400).json(result);
+      }
+
+      return res.json(
+        this.apiResponse(true, "Senha redefinida com sucesso!", result.data)
+      );
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // 21. ✅ VERIFICAR EMAIL
+  public verifyEmail = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const { token } = req.params;
+
+      const result = await this.userService.verifyEmail(token);
+
+      if (!result.success) {
+        const errorResult = result as { success: false; error: string };
+        throw new AppError(
+          errorResult.error || "Token inválido ou expirado",
+          400,
+          "INVALID_TOKEN"
+        );
+      }
+
+      res.json({
+        success: true,
+        message: "Email verificado com sucesso! Sua conta foi ativada.",
+        data: (result as any).data,
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  // 22. ✅ ATUALIZAR PREFERÊNCIAS
+  public updatePreferences = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const userId = (req as any).user?.id;
+      const { preferences } = req.body;
+
+      if (!userId) {
+        throw new AppError("Não autenticado", 401, "UNAUTHORIZED");
+      }
+
+      if (!preferences || typeof preferences !== "object") {
+        throw new AppError(
+          "Preferências devem ser um objeto válido",
+          400,
+          "INVALID_PREFERENCES"
+        );
+      }
+
+      const result = await this.userService.updatePreferences(
+        userId,
+        preferences
+      );
+
+      if (!result.success) {
+        const errorResult = result as {
+          success: false;
+          error: string;
+          statusCode?: number;
+        };
+        return res.status(errorResult.statusCode || 400).json(result);
+      }
+
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // ✅ MÉTODOS ABSTRATOS OBRIGATÓRIOS
   protected abstract validateSpecificData(
     data: any
   ): Promise<{ error: string; code: string } | null>;

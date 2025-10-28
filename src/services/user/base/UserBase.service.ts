@@ -6,7 +6,7 @@ export abstract class UserBaseService {
 
   // ✅ MÉTODOS DE RESPOSTA PADRÃO
   protected successResponse(
-    data: any,
+    data: any, 
     statusCode: number = 200,
     message?: string
   ) {

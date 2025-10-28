@@ -1,4 +1,3 @@
-// AUTH-USERS-SERVICE/src/services/user/employee/Employee.service.ts
 import bcrypt from "bcrypt";
 import { UserBaseService } from "../base/UserBase.service";
 import {
@@ -10,108 +9,291 @@ import {
   EmployeeSubRole,
   UserStatus,
 } from "../../../models/interfaces/user.roles";
-import generateCustomUserId from "../../../utils/generateCustomUserId";
+import { generateUserId } from "../../../utils/generateCustomUserId";
 
 export class EmployeeService extends UserBaseService {
   protected userModel = EmployeeModel;
 
+  constructor() {
+    super();
+    console.log(`✅ EmployeeService inicializado`);
+  }
+
   // ✅ IMPLEMENTAÇÕES DOS MÉTODOS ABSTRATOS OBRIGATÓRIOS
   protected mapToSessionUser(employee: EmployeeDocument) {
+    if (!employee) {
+      throw new Error("Employee document é null ou undefined");
+    }
+
     return {
-      id: employee._id.toString(),
-      email: employee.email,
-      role: employee.role,
-      subRole: employee.employeeData.subRole,
-      isVerified: employee.isVerified,
-      isActive: employee.isActive,
-      status: employee.status,
-      fullName: employee.fullName,
-      profileImage: employee.profileImage,
-      lastLogin: employee.lastLogin,
+      id: employee._id?.toString() || "",
+      email: employee.email || "",
+      role: employee.role || UserMainRole.EMPLOYEE,
+      subRole: employee.employeeData?.subRole || EmployeeSubRole.STAFF,
+      isVerified: employee.isVerified || false,
+      isActive: employee.isActive || false,
+      status: employee.status || UserStatus.PENDING_VERIFICATION,
+      fullName: employee.fullName || { firstName: "", lastName: "" },
+      profileImage: employee.profileImage || "",
+      lastLogin: employee.lastLogin || new Date(),
       employeeData: {
-        subRole: employee.employeeData.subRole,
-        professionalTitle: employee.employeeData.professionalTitle,
-        isAvailable: employee.employeeData.isAvailable,
-        rating: employee.employeeData.rating,
+        subRole: employee.employeeData?.subRole || EmployeeSubRole.STAFF,
+        professionalTitle: employee.employeeData?.professionalTitle || "",
+        isAvailable: employee.employeeData?.isAvailable || false,
+        rating: employee.employeeData?.rating || {
+          average: 0,
+          totalReviews: 0,
+        },
       },
     };
   }
 
   protected enrichUserData(employee: EmployeeDocument) {
+    const baseData = this.mapToSessionUser(employee);
+
     return {
-      ...this.mapToSessionUser(employee),
-      phoneNumber: employee.phoneNumber,
+      ...baseData,
+      phoneNumber: employee.phoneNumber || "",
       birthDate: employee.birthDate,
       gender: employee.gender,
-      address: employee.address,
-      preferences: employee.preferences,
-      employeeData: employee.employeeData,
+      address: employee.address || {},
+      preferences: employee.preferences || {},
+      employeeData: employee.employeeData || {},
       createdAt: employee.createdAt,
       updatedAt: employee.updatedAt,
     };
   }
 
-  // ✅ IMPLEMENTAÇÃO DO MÉTODO ABSTRATO createSpecificUser
+  // ✅ MÉTODO ABSTRATO createSpecificUser - CORRIGIDO
   protected async createSpecificUser(employeeData: any) {
     try {
+      console.log(`🎯 [EmployeeService] Criando employee:`, employeeData.email);
+      console.log(`📋 [EmployeeService] Dados recebidos:`, {
+        email: employeeData.email,
+        firstName: employeeData.firstName,
+        lastName: employeeData.lastName,
+        fullName: employeeData.fullName,
+        phone: employeeData.phone,
+        phoneNumber: employeeData.phoneNumber,
+        hasPassword: !!employeeData.password,
+        acceptTerms: employeeData.acceptTerms,
+        subRole: employeeData.employeeData?.subRole,
+      });
+
+      // ✅ VALIDAÇÃO MELHORADA
       if (!employeeData.employeeData?.subRole) {
+        console.log(
+          `❌ [EmployeeService] Sub-role não fornecido:`,
+          employeeData.employeeData
+        );
         return this.errorResponse(
-          "Sub-role é obrigatório",
+          "Sub-role é obrigatório para employees",
           "MISSING_SUBROLE",
           400
         );
       }
 
-      if (!(await this.isEmailAvailable(employeeData.email))) {
-        return this.errorResponse("Email já cadastrado", "EMAIL_EXISTS", 409);
+      // ✅ CORREÇÃO: Obter firstName e lastName de múltiplas fontes
+      const firstName =
+        employeeData.firstName || employeeData.fullName?.firstName;
+      const lastName =
+        employeeData.lastName || employeeData.fullName?.lastName || "";
+
+      if (!firstName) {
+        console.log(`❌ [EmployeeService] First name não fornecido`);
+        return this.errorResponse(
+          "Nome é obrigatório",
+          "MISSING_FIRST_NAME",
+          400
+        );
       }
 
-      const employeeId = generateCustomUserId(UserMainRole.EMPLOYEE);
-      const hashedPassword = await bcrypt.hash(employeeData.password, 12);
+      if (!employeeData.password) {
+        console.log(`❌ [EmployeeService] Password não fornecido`);
+        return this.errorResponse(
+          "Senha é obrigatória",
+          "MISSING_PASSWORD",
+          400
+        );
+      }
 
-      const newEmployee = await EmployeeModel.create({
+      if (!employeeData.acceptTerms) {
+        console.log(`❌ [EmployeeService] Termos não aceitos`);
+        return this.errorResponse(
+          "Termos devem ser aceitos",
+          "TERMS_NOT_ACCEPTED",
+          400
+        );
+      }
+
+      // ✅ Verificar disponibilidade do email
+      console.log(
+        `🔍 [EmployeeService] Verificando disponibilidade do email...`
+      );
+      const emailAvailable = await this.isEmailAvailable(employeeData.email);
+      if (!emailAvailable) {
+        console.log(
+          `❌ [EmployeeService] Email já está em uso: ${employeeData.email}`
+        );
+        return this.errorResponse("Email já cadastrado", "EMAIL_EXISTS", 409);
+      }
+      console.log(
+        `✅ [EmployeeService] Email disponível: ${employeeData.email}`
+      );
+
+      // ✅ Gerar ID padronizado
+      const employeeId = generateUserId();
+      console.log(`🆔 [EmployeeService] ID gerado: ${employeeId}`);
+
+      const hashedPassword = await bcrypt.hash(employeeData.password, 12);
+      console.log(`🔐 [EmployeeService] Password hash gerado`);
+
+      // ✅ CORREÇÃO: Obter phoneNumber de múltiplas fontes
+      const phoneNumber = employeeData.phoneNumber || employeeData.phone || "";
+
+      // ✅ CORREÇÃO: Garantir que todos os campos obrigatórios estão preenchidos
+      const fullName = {
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        displayName: `${firstName.trim()} ${lastName.trim()}`.trim(),
+      };
+
+      // ✅ Preparar dados do employee com estrutura correta
+      const employeePayload = {
         _id: employeeId,
-        ...employeeData,
+        email: employeeData.email.toLowerCase().trim(),
+        fullName: fullName,
+        phoneNumber: phoneNumber.trim(),
         password: hashedPassword,
+        acceptTerms: employeeData.acceptTerms,
         role: UserMainRole.EMPLOYEE,
-        status: UserStatus.PENDING_VERIFICATION,
-        isActive: false,
-        isVerified: false,
+        status: UserStatus.ACTIVE, // ✅ Vai direto para ACTIVE como o cliente
+        isActive: true, // ✅ Fica ativo
+        isVerified: true, // ✅ Marcado como verificado
         employeeData: {
-          hireDate: new Date(),
-          experienceYears: 0,
-          rating: { average: 0, totalReviews: 0 },
+          subRole: employeeData.employeeData.subRole,
+          professionalTitle:
+            employeeData.employeeData.professionalTitle ||
+            this.getProfessionalTitle(employeeData.employeeData.subRole),
+          experienceYears: employeeData.employeeData.experienceYears || 0,
+          bio: employeeData.employeeData.bio || "",
+          services: employeeData.employeeData.services || [],
+          specialties: employeeData.employeeData.specialties || [],
+          rating: {
+            average: 0,
+            totalReviews: 0,
+          },
           isAvailable: false,
           workSchedule: this.getDefaultWorkSchedule(),
-          services: employeeData.employeeData.services || [],
-          ...employeeData.employeeData,
+          totalAppointments: 0,
+          hireDate: new Date(),
+        },
+        preferences: {
+          theme: "light",
+          notifications: {
+            email: true,
+            push: true,
+            sms: false,
+            whatsapp: false,
+          },
+          language: "pt-MZ",
+          timezone: "UTC",
+        },
+      };
+
+      console.log(`📦 [EmployeeService] Payload final:`, {
+        _id: employeePayload._id,
+        email: employeePayload.email,
+        fullName: employeePayload.fullName,
+        phoneNumber: employeePayload.phoneNumber,
+        hasPassword: !!employeePayload.password,
+        role: employeePayload.role,
+        employeeData: {
+          subRole: employeePayload.employeeData.subRole,
+          professionalTitle: employeePayload.employeeData.professionalTitle,
         },
       });
 
-      console.log(`✅ Employee criado: ${newEmployee._id}`);
+      const newEmployee = await EmployeeModel.create(employeePayload);
+
+      console.log(`✅ Employee criado com sucesso: ${newEmployee._id}`);
 
       return this.successResponse(
-        this.enrichUserData(newEmployee),
-        202,
-        "Registro criado com sucesso! Verifique seu email."
+        {
+          user: this.enrichUserData(newEmployee),
+          message:
+            "Employee registrado com sucesso! Verifique seu email para ativar a conta.",
+        },
+        201,
+        "Employee registrado com sucesso! Verifique seu email para ativar a conta."
       );
-    } catch (error) {
+    } catch (error: any) {
       console.error("[EmployeeService] Erro ao criar employee:", error);
+      console.error("[EmployeeService] Stack trace:", error.stack);
+
+      // ✅ CORREÇÃO: Mensagem de erro mais específica
+      if (error.name === "ValidationError") {
+        const validationErrors = Object.values(error.errors).map(
+          (err: any) => err.message
+        );
+        return this.errorResponse(
+          `Erro de validação: ${validationErrors.join(", ")}`,
+          "VALIDATION_ERROR",
+          400,
+          validationErrors
+        );
+      }
+
       return this.errorResponse(
-        "Erro ao criar employee",
+        "Erro interno ao criar employee",
         "CREATE_EMPLOYEE_ERROR",
         500,
-        error
+        error.message
       );
     }
   }
 
-  // ✅ MÉTODO PÚBLICO PARA CRIAR EMPLOYEE (mantido para compatibilidade)
+  // ✅ MÉTODO AUXILIAR PARA TÍTULO PROFISSIONAL
+  private getProfessionalTitle(subRole: string): string {
+    const titles: { [key: string]: string } = {
+      salon_owner: "Proprietário de Salão",
+      stylist: "Estilista Profissional",
+      barber: "Barbeiro",
+      manicurist: "Manicure",
+      esthetician: "Esteticista",
+      receptionist: "Recepcionista",
+      staff: "Funcionário do Salão",
+      SALON_OWNER: "Proprietário de Salão",
+      STYLIST: "Estilista Profissional",
+      BARBER: "Barbeiro",
+      MANICURIST: "Manicure",
+      ESTHETICIAN: "Esteticista",
+      RECEPTIONIST: "Recepcionista",
+      STAFF: "Funcionário do Salão",
+    };
+
+    return titles[subRole] || "Profissional de Beleza";
+  }
+
+  // ✅ MÉTODO PARA VERIFICAR DISPONIBILIDADE DO EMAIL
+  protected async isEmailAvailable(email: string): Promise<boolean> {
+    try {
+      const existingEmployee = await EmployeeModel.findOne({
+        email: email.toLowerCase().trim(),
+      });
+      return !existingEmployee;
+    } catch (error) {
+      console.error("[EmployeeService] Erro ao verificar email:", error);
+      return false;
+    }
+  }
+
+  // ✅ MÉTODO PÚBLICO PARA CRIAR EMPLOYEE (compatibilidade)
   public async createEmployee(employeeData: any) {
     return this.createSpecificUser(employeeData);
   }
 
-  // 2. ATIVAÇÃO DE CONTA (específico - não existe no UserBase)
+  // ✅ ATIVAÇÃO DE CONTA
   public async activateAccount(employeeId: string) {
     try {
       const employee = await EmployeeModel.findById(employeeId);
@@ -135,7 +317,8 @@ export class EmployeeService extends UserBaseService {
         200,
         "Conta ativada com sucesso"
       );
-    } catch (error) {
+    } catch (error: any) {
+      console.error("[EmployeeService] Erro ao ativar conta:", error);
       return this.errorResponse(
         "Erro ao ativar conta",
         "ACTIVATION_ERROR",
@@ -145,7 +328,80 @@ export class EmployeeService extends UserBaseService {
     }
   }
 
-  // 3. DISPONIBILIDADE (específico do employee)
+  // ✅ MÉTODO UPDATE PROFILE
+  public async updateProfile(userId: string, updateData: any) {
+    try {
+      console.log(
+        `✏️ [EmployeeService] Atualizando perfil: ${userId}`,
+        updateData
+      );
+
+      // ✅ Remover campos que não podem ser atualizados
+      const { password, email, role, _id, ...safeUpdateData } = updateData;
+
+      const employee = await EmployeeModel.findByIdAndUpdate(
+        userId,
+        { $set: safeUpdateData },
+        { new: true, runValidators: true }
+      ).select("-password");
+
+      if (!employee) {
+        return this.errorResponse(
+          "Employee não encontrado",
+          "EMPLOYEE_NOT_FOUND",
+          404
+        );
+      }
+
+      return this.successResponse(
+        this.enrichUserData(employee),
+        200,
+        "Perfil atualizado com sucesso"
+      );
+    } catch (error: any) {
+      console.error("[EmployeeService] Erro ao atualizar perfil:", error);
+      return this.errorResponse(
+        "Erro ao atualizar perfil",
+        "UPDATE_PROFILE_ERROR",
+        500,
+        error
+      );
+    }
+  }
+
+  // ✅ MÉTODO PARA ATUALIZAR PREFERÊNCIAS
+  public async updatePreferences(userId: string, preferences: any) {
+    try {
+      const employee = await EmployeeModel.findByIdAndUpdate(
+        userId,
+        { $set: { preferences } },
+        { new: true }
+      ).select("-password");
+
+      if (!employee) {
+        return this.errorResponse(
+          "Employee não encontrado",
+          "EMPLOYEE_NOT_FOUND",
+          404
+        );
+      }
+
+      return this.successResponse({
+        preferences: employee.preferences,
+        message: "Preferências atualizadas com sucesso",
+      });
+    } catch (error: any) {
+      console.error("[EmployeeService] Erro ao atualizar preferências:", error);
+      return this.errorResponse(
+        "Erro ao atualizar preferências",
+        "UPDATE_PREFERENCES_ERROR",
+        500,
+        error
+      );
+    }
+  }
+
+  // ✅ DISPONIBILIDADE
   public async toggleAvailability(employeeId: string, isAvailable: boolean) {
     try {
       const employee = await EmployeeModel.findByIdAndUpdate(
@@ -168,7 +424,11 @@ export class EmployeeService extends UserBaseService {
           ? "Agora está disponível para agendamentos"
           : "Indisponível para agendamentos",
       });
-    } catch (error) {
+    } catch (error: any) {
+      console.error(
+        "[EmployeeService] Erro ao atualizar disponibilidade:",
+        error
+      );
       return this.errorResponse(
         "Erro ao atualizar disponibilidade",
         "UPDATE_AVAILABILITY_ERROR",
@@ -178,7 +438,7 @@ export class EmployeeService extends UserBaseService {
     }
   }
 
-  // 4. HORÁRIO DE TRABALHO (específico do employee)
+  // ✅ HORÁRIO DE TRABALHO
   public async updateWorkSchedule(employeeId: string, schedule: any) {
     try {
       const employee = await EmployeeModel.findByIdAndUpdate(
@@ -199,7 +459,8 @@ export class EmployeeService extends UserBaseService {
         workSchedule: employee.employeeData.workSchedule,
         message: "Horário de trabalho atualizado",
       });
-    } catch (error) {
+    } catch (error: any) {
+      console.error("[EmployeeService] Erro ao atualizar horário:", error);
       return this.errorResponse(
         "Erro ao atualizar horário",
         "UPDATE_SCHEDULE_ERROR",
@@ -209,7 +470,7 @@ export class EmployeeService extends UserBaseService {
     }
   }
 
-  // 5. SERVIÇOS PRESTADOS (específico do employee)
+  // ✅ SERVIÇOS PRESTADOS
   public async updateServices(employeeId: string, services: string[]) {
     try {
       const employee = await EmployeeModel.findByIdAndUpdate(
@@ -230,7 +491,8 @@ export class EmployeeService extends UserBaseService {
         services: employee.employeeData.services,
         message: "Serviços atualizados",
       });
-    } catch (error) {
+    } catch (error: any) {
+      console.error("[EmployeeService] Erro ao atualizar serviços:", error);
       return this.errorResponse(
         "Erro ao atualizar serviços",
         "UPDATE_SERVICES_ERROR",
@@ -260,7 +522,8 @@ export class EmployeeService extends UserBaseService {
         services: employee.employeeData.services,
         message: "Serviço adicionado",
       });
-    } catch (error) {
+    } catch (error: any) {
+      console.error("[EmployeeService] Erro ao adicionar serviço:", error);
       return this.errorResponse(
         "Erro ao adicionar serviço",
         "ADD_SERVICE_ERROR",
@@ -270,7 +533,7 @@ export class EmployeeService extends UserBaseService {
     }
   }
 
-  // 6. LISTAGEM PÚBLICA (específico do employee)
+  // ✅ LISTAGEM PÚBLICA
   public async getAvailableEmployees(
     service?: string,
     subRole?: EmployeeSubRole
@@ -310,7 +573,7 @@ export class EmployeeService extends UserBaseService {
         })),
         total: employees.length,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error(
         "[EmployeeService] Erro ao listar employees disponíveis:",
         error
@@ -324,7 +587,7 @@ export class EmployeeService extends UserBaseService {
     }
   }
 
-  // 7. PERFIL PÚBLICO (específico do employee)
+  // ✅ PERFIL PÚBLICO
   public async getEmployeePublicProfile(employeeId: string) {
     try {
       const employee = await EmployeeModel.findById(employeeId).select(
@@ -356,7 +619,8 @@ export class EmployeeService extends UserBaseService {
       };
 
       return this.successResponse(publicProfile);
-    } catch (error) {
+    } catch (error: any) {
+      console.error("[EmployeeService] Erro ao buscar perfil:", error);
       return this.errorResponse(
         "Erro ao buscar perfil",
         "GET_PROFILE_ERROR",
@@ -366,7 +630,7 @@ export class EmployeeService extends UserBaseService {
     }
   }
 
-  // ✅ MÉTODO PARA LISTAR EMPLOYEES (ADMIN)
+  // ✅ LISTAR EMPLOYEES (ADMIN)
   public async listEmployees(options: {
     page: number;
     limit: number;
@@ -400,7 +664,9 @@ export class EmployeeService extends UserBaseService {
       const total = await EmployeeModel.countDocuments(query);
 
       return this.successResponse({
-        employees: employees.map((employee) => this.enrichUserData(employee)),
+        employees: employees.map((employee: EmployeeDocument) =>
+          this.enrichUserData(employee)
+        ),
         pagination: {
           page,
           limit,
@@ -408,7 +674,7 @@ export class EmployeeService extends UserBaseService {
           pages: Math.ceil(total / limit),
         },
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("[EmployeeService] Erro ao listar employees:", error);
       return this.errorResponse(
         "Erro ao listar employees",
@@ -419,7 +685,7 @@ export class EmployeeService extends UserBaseService {
     }
   }
 
-  // ✅ MÉTODO PARA ATUALIZAR STATUS DO EMPLOYEE (ADMIN)
+  // ✅ ATUALIZAR STATUS DO EMPLOYEE (ADMIN)
   public async updateEmployeeStatus(employeeId: string, status: string) {
     try {
       const validStatuses = Object.values(UserStatus);
@@ -452,7 +718,7 @@ export class EmployeeService extends UserBaseService {
         200,
         `Status do employee atualizado para ${status}`
       );
-    } catch (error) {
+    } catch (error: any) {
       console.error("[EmployeeService] Erro ao atualizar status:", error);
       return this.errorResponse(
         "Erro ao atualizar status",
@@ -463,12 +729,66 @@ export class EmployeeService extends UserBaseService {
     }
   }
 
-  // ✅ MÉTODO AUXILIAR PARA VERIFICAR EMAIL (PROTECTED - compatível com UserBaseService)
-  protected async isEmailAvailable(email: string): Promise<boolean> {
-    const employee = await EmployeeModel.findOne({
-      email: email.toLowerCase().trim(),
-    });
-    return !employee;
+  // ✅ MÉTODOS DE STATUS E CLEANUP
+  public async getRegistrationStatus(email: string) {
+    try {
+      const employee = await EmployeeModel.findOne({
+        email: email.toLowerCase().trim(),
+      });
+
+      if (!employee) {
+        return this.successResponse({
+          email,
+          exists: false,
+          status: "NOT_REGISTERED",
+          canRegister: true,
+        });
+      }
+
+      return this.successResponse({
+        email,
+        exists: true,
+        status: employee.status,
+        isVerified: employee.isVerified,
+        isActive: employee.isActive,
+        createdAt: employee.createdAt,
+        canRegister: employee.status === UserStatus.INACTIVE,
+      });
+    } catch (error: any) {
+      console.error("[EmployeeService] Erro ao buscar status:", error);
+      return this.errorResponse(
+        "Erro ao buscar status de registro",
+        "STATUS_CHECK_ERROR",
+        500,
+        error
+      );
+    }
+  }
+
+  public async cleanupRegistration(email: string) {
+    try {
+      const result = await EmployeeModel.deleteOne({
+        email: email.toLowerCase().trim(),
+      });
+
+      if (result.deletedCount === 0) {
+        return this.errorResponse(
+          "Registro não encontrado",
+          "REGISTRATION_NOT_FOUND",
+          404
+        );
+      }
+
+      return this.successResponse(null, 200, "Registro limpo com sucesso");
+    } catch (error: any) {
+      console.error("[EmployeeService] Erro na limpeza:", error);
+      return this.errorResponse(
+        "Erro ao limpar registro",
+        "CLEANUP_ERROR",
+        500,
+        error
+      );
+    }
   }
 
   // ✅ MÉTODO AUXILIAR PRIVADO
@@ -484,3 +804,5 @@ export class EmployeeService extends UserBaseService {
     };
   }
 }
+
+export default EmployeeService;

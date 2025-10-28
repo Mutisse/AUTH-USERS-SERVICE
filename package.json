@@ -40,7 +40,7 @@
     "@types/express-mongo-sanitize": "^1.3.2",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/mongoose": "^5.11.97",
-    "@types/node": "^20.19.22",
+    "@types/node": "^20.19.23",
     "@types/node-cache": "^4.1.3",
     "@types/nodemailer": "^7.0.2",
     "nodemon": "^3.1.10",
@@ -54,6 +54,6 @@
     "users",
     "microservice"
   ],
-  "author": "Seu Nome",
+  "author": "Edilson Mutisse",
   "license": "MIT"
 }

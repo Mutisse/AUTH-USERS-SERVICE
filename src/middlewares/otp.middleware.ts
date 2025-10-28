@@ -1,64 +1,86 @@
-import { Request, Response, NextFunction } from "express";
-import { OTPService } from "../services/otp/OTP.service";
-import { AppError } from "../utils/AppError";
+import { OtpClientService } from "../services/otp/OtpClient.service";
 
-const otpService = new OTPService();
+export interface OTPStatus {
+  exists: boolean;
+  verified: boolean;
+  expiresAt?: Date;
+  purpose?: string;
+}
 
-// 🎯 VERIFICAR SE EMAIL ESTÁ VERIFICADO VIA OTP
-// src/middlewares/otp.middleware.ts
-// CORREÇÃO NO MIDDLEWARE:
+export class OTPService {
+  private otpClient: OtpClientService;
 
-export const requireEmailVerification = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    const { email } = req.body;
-
-    if (!email) {
-      throw new AppError("Email é obrigatório", 400, "MISSING_EMAIL");
-    }
-
-    // ✅ CORREÇÃO: ADICIONAR AWAIT
-    const otpStatus = await otpService.getOTPStatus(email);
-
-    if (!otpStatus.exists) {
-      throw new AppError(
-        "Email não verificado. Solicite um código OTP.",
-        403,
-        "EMAIL_NOT_VERIFIED"
-      );
-    }
-
-    if (!otpStatus.verified) {
-      throw new AppError(
-        "Email não verificado. Complete a verificação com o código OTP.",
-        403,
-        "EMAIL_NOT_VERIFIED"
-      );
-    }
-
-    next();
-  } catch (error) {
-    next(error);
+  constructor() {
+    this.otpClient = new OtpClientService();
   }
-};
 
-// 🎯 RATE LIMITING PARA OTP
-export const otpRateLimit = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    const { email } = req.body;
-    const clientIP = req.ip;
+  /**
+   * Verificar status do OTP para um email
+   */
+  async getOTPStatus(email: string): Promise<OTPStatus> {
+    try {
+      const response = await this.otpClient.getOTPStatus(email);
+      
+      if (!response.success) {
+        return {
+          exists: false,
+          verified: false
+        };
+      }
 
-    // TODO: Implementar rate limiting por IP e email
-    // Por enquanto, apenas prossegue
-    next();
-  } catch (error) {
-    next(error);
+      // Adapte conforme a estrutura real da resposta do seu serviço
+      const otpData = response.data;
+      
+      return {
+        exists: otpData?.exists || otpData?.active || false,
+        verified: otpData?.verified || otpData?.isVerified || false,
+        expiresAt: otpData?.expiresAt ? new Date(otpData.expiresAt) : undefined,
+        purpose: otpData?.purpose
+      };
+    } catch (error) {
+      console.error(`❌ [OTP Service] Erro ao buscar status para ${email}:`, error);
+      return {
+        exists: false,
+        verified: false
+      };
+    }
   }
-};
+
+  /**
+   * Verificar se email está verificado para um propósito específico
+   */
+  async isEmailVerified(email: string, purpose: string = "registration"): Promise<boolean> {
+    try {
+      const response = await this.otpClient.checkOTPVerificationStatus(email, purpose);
+      
+      return response.success && response.data?.verified === true;
+    } catch (error) {
+      console.error(`❌ [OTP Service] Erro ao verificar email ${email}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Enviar OTP para registro
+   */
+  async sendRegistrationOTP(email: string, name: string): Promise<boolean> {
+    const response = await this.otpClient.sendRegistrationOTP(email, name);
+    return response.success;
+  }
+
+  /**
+   * Verificar OTP para registro
+   */
+  async verifyRegistrationOTP(email: string, code: string): Promise<boolean> {
+    const response = await this.otpClient.verifyRegistrationOTP(email, code);
+    return response.success;
+  }
+
+  /**
+   * Invalidar OTP após uso
+   */
+  async invalidateOTP(email: string, purpose: string = "registration"): Promise<boolean> {
+    const response = await this.otpClient.invalidateOTP(email, purpose);
+    return response.success;
+  }
+}

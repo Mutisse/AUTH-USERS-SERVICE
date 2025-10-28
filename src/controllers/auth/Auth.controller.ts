@@ -1,4 +1,4 @@
-// AUTH-USERS-SERVICE/src/controllers/auth/Auth.controller.ts
+// AUTHUSERS-SERVICE/src/controllers/auth/Auth.controller.ts
 import { Request, Response, NextFunction } from "express";
 import { AuthService } from "../../services/auth/Auth.service";
 import { ClientController } from "../user/client/Client.controller";
@@ -279,4 +279,88 @@ export class AuthController {
       });
     }
   };
+
+  // ✅ SEND VERIFICATION (para verificação de email disponível)
+  public sendVerification = async (req: Request, res: Response) => {
+    try {
+      const { email } = req.body;
+
+      if (!email) {
+        return res.status(400).json({
+          success: false,
+          error: "Email é obrigatório",
+          code: "MISSING_EMAIL",
+        });
+      }
+
+      const result = await this.authService.sendVerification(email);
+
+      return res.status(result.statusCode || 200).json(result);
+    } catch (error) {
+      console.error("[AuthController] Erro no send verification:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Erro interno no servidor",
+        code: "INTERNAL_ERROR",
+      });
+    }
+  };
+
+  // ✅ VERIFY ACCOUNT (para verificação de conta)
+  public verifyAccount = async (req: Request, res: Response) => {
+    try {
+      const { email, code } = req.body;
+
+      if (!email || !code) {
+        return res.status(400).json({
+          success: false,
+          error: "Email e código são obrigatórios",
+          code: "MISSING_CREDENTIALS",
+        });
+      }
+
+      const result = await this.authService.verifyAccount(email, code);
+
+      return res.status(result.statusCode || 200).json(result);
+    } catch (error) {
+      console.error("[AuthController] Erro na verificação de conta:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Erro interno no servidor",
+        code: "INTERNAL_ERROR",
+      });
+    }
+  };
+
+  // ✅ VALIDATE CREDENTIALS (para validação interna)
+  public validateCredentials = async (req: Request, res: Response) => {
+    try {
+      const { email, password } = req.body;
+
+      if (!email || !password) {
+        return res.status(400).json({
+          success: false,
+          error: "Email e senha são obrigatórios",
+          code: "MISSING_CREDENTIALS",
+        });
+      }
+
+      const result = await this.authService.validateCredentials(email, password);
+
+      return res.status(200).json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      console.error("[AuthController] Erro na validação de credenciais:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Erro interno no servidor",
+        code: "INTERNAL_ERROR",
+      });
+    }
+  };
 }
+
+// ✅ EXPORT DEFAULT para evitar problemas de importação
+export default AuthController;

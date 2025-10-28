@@ -1,4 +1,3 @@
-// AUTH-USERS-SERVICE/src/services/user/admin/Admin.service.ts
 import bcrypt from "bcryptjs";
 import { UserBaseService } from "../base/UserBase.service";
 import { AdminModel } from "../../../models/user/admin/Admin.model";
@@ -6,7 +5,7 @@ import {
   UserMainRole,
   UserStatus,
 } from "../../../models/interfaces/user.roles";
-import generateCustomUserId from "../../../utils/generateCustomUserId";
+import { generateUserId } from "../../../utils/generateCustomUserId"; // ✅ CORREÇÃO: Importação nomeada
 
 export class AdminService extends UserBaseService {
   protected userModel = AdminModel;
@@ -74,7 +73,7 @@ export class AdminService extends UserBaseService {
       }
 
       // 🎯 GERAR ID E HASH PASSWORD
-      const adminId = generateCustomUserId(UserMainRole.ADMINSYSTEM);
+      const adminId = generateUserId(); // ✅ CORREÇÃO: Sem parâmetro
       const hashedPassword = await bcrypt.hash(adminData.password, 12);
 
       // 🎯 CRIAR ADMIN

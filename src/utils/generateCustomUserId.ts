@@ -1,354 +1,100 @@
-import { UserMainRole, EmployeeSubRole } from "../models/interfaces/user.roles";
-
-// 🎯 CONFIGURAÇÃO DO GERADOR DE ID
-interface IdGeneratorConfig {
-  prefix: string;
-  pattern: string; // 'T' = timestamp, 'R' = random, 'L' = letters, 'N' = numbers
-  length: number;
-  separator?: string;
-  checksum?: boolean;
-}
-
-// 🎯 CONFIGURAÇÕES POR TIPO DE USUÁRIO
-const ID_CONFIGS: Record<string, IdGeneratorConfig> = {
-  [UserMainRole.CLIENT]: {
-    prefix: "CLI",
-    pattern: "TTTLLLRNN",
-    length: 12,
-    separator: "-",
-    checksum: true
-  },
-  [UserMainRole.EMPLOYEE]: {
-    prefix: "EMP",
-    pattern: "TTTLLLRNN",
-    length: 12,
-    separator: "-",
-    checksum: true
-  },
-  [UserMainRole.ADMINSYSTEM]: {
-    prefix: "ADM",
-    pattern: "TTTLLLRNN",
-    length: 12,
-    separator: "-",
-    checksum: true
-  }
-};
-
-// 🎯 CONFIGURAÇÕES ESPECÍFICAS POR SUB-ROLE
-const SUBROLE_PREFIXES: Partial<Record<EmployeeSubRole, string>> = {
-  [EmployeeSubRole.SALON_OWNER]: "SO",
-  [EmployeeSubRole.MANAGER]: "MG",
-  [EmployeeSubRole.STAFF]: "ST",
-  [EmployeeSubRole.RECEPTIONIST]: "RC"
-};
-
-// 🎯 GERADOR PRINCIPAL
-export class UserIdGenerator {
+export class SimpleIdGenerator {
+  private static instance: SimpleIdGenerator;
   private usedIds: Set<string> = new Set();
-  private static instance: UserIdGenerator;
 
-  public static getInstance(): UserIdGenerator {
-    if (!UserIdGenerator.instance) {
-      UserIdGenerator.instance = new UserIdGenerator();
+  public static getInstance(): SimpleIdGenerator {
+    if (!SimpleIdGenerator.instance) {
+      SimpleIdGenerator.instance = new SimpleIdGenerator();
     }
-    return UserIdGenerator.instance;
+    return SimpleIdGenerator.instance;
   }
 
   /**
-   * Gera um ID customizado baseado no role e sub-role
+   * Gera um ID no formato URS429XY5-HH-AAAA/MM/DD
    */
-  public generate(
-    role: UserMainRole, 
-    subRole?: EmployeeSubRole, 
-    options: { 
-      includeSubRole?: boolean; 
-      customPrefix?: string;
-      timestamp?: number;
-    } = {}
-  ): string {
-    const config = ID_CONFIGS[role] || this.getDefaultConfig();
-    const { includeSubRole = true, customPrefix, timestamp = Date.now() } = options;
-
-    let userId: string;
+  public generate(): string {
+    let id: string;
     let attempts = 0;
-    const maxAttempts = 10;
+    const maxAttempts = 5;
 
     do {
-      userId = this.buildUserId(role, subRole, config, timestamp, includeSubRole, customPrefix);
+      // Parte 1: URS + 6 caracteres aleatórios (letras e números)
+      const randomPart = "URS" + this.generateRandomString(6);
+
+      // Parte 2: HH (hora atual)
+      const hours = new Date().getHours().toString().padStart(2, "0");
+
+      // Parte 3: AAAA/MM/DD (data atual)
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = (now.getMonth() + 1).toString().padStart(2, "0");
+      const day = now.getDate().toString().padStart(2, "0");
+      const datePart = `${year}${month}${day}`;
+
+      id = `${randomPart}${hours}${datePart}`;
       attempts++;
-      
+
       if (attempts > maxAttempts) {
-        throw new Error(`Não foi possível gerar um ID único após ${maxAttempts} tentativas`);
+        throw new Error("Não foi possível gerar um ID único");
       }
-    } while (this.usedIds.has(userId));
+    } while (this.usedIds.has(id));
 
-    this.usedIds.add(userId);
-    return userId;
-  }
-
-  /**
-   * Constrói o ID passo a passo
-   */
-  private buildUserId(
-    role: UserMainRole,
-    subRole: EmployeeSubRole | undefined,
-    config: IdGeneratorConfig,
-    timestamp: number,
-    includeSubRole: boolean,
-    customPrefix?: string
-  ): string {
-    const parts: string[] = [];
-
-    // 🎯 PREFIXO
-    let prefix = customPrefix || config.prefix;
-    if (includeSubRole && subRole && SUBROLE_PREFIXES[subRole]) {
-      prefix += SUBROLE_PREFIXES[subRole];
-    }
-    parts.push(prefix);
-
-    // 🎯 CORPO BASEADO NO PATTERN
-    const body = this.generateFromPattern(config.pattern, timestamp);
-    parts.push(body);
-
-    // 🎯 CHECKSUM (opcional)
-    if (config.checksum) {
-      const checksum = this.generateChecksum(parts.join(''));
-      parts.push(checksum);
-    }
-
-    // 🎯 FORMATAÇÃO FINAL
-    let finalId = parts.join(config.separator || '');
-
-    // 🎯 GARANTIR COMPRIMENTO
-    finalId = this.ensureLength(finalId, config.length);
-
-    return finalId;
-  }
-
-  /**
-   * Gera parte do ID baseado no pattern
-   */
-  private generateFromPattern(pattern: string, timestamp: number): string {
-    let result = '';
-
-    for (const char of pattern) {
-      switch (char) {
-        case 'T': // Timestamp
-          result += timestamp.toString().slice(-3);
-          break;
-        case 'R': // Random
-          result += Math.random().toString(36).substring(2, 4).toUpperCase();
-          break;
-        case 'L': // Letters
-          result += this.generateRandomLetters(1);
-          break;
-        case 'N': // Numbers
-          result += Math.floor(Math.random() * 10);
-          break;
-        default:
-          result += char;
-      }
-    }
-
-    return result;
-  }
-
-  /**
-   * Gera letras aleatórias
-   */
-  private generateRandomLetters(length: number): string {
-    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    let result = '';
-
-    for (let i = 0; i < length; i++) {
-      result += letters.charAt(Math.floor(Math.random() * letters.length));
-    }
-
-    return result;
-  }
-
-  /**
-   * Gera checksum simples
-   */
-  private generateChecksum(id: string): string {
-    let sum = 0;
-    
-    for (let i = 0; i < id.length; i++) {
-      const char = id.charCodeAt(i);
-      sum = (sum + char) % 36;
-    }
-
-    return sum.toString(36).toUpperCase();
-  }
-
-  /**
-   * Garante o comprimento do ID
-   */
-  private ensureLength(id: string, length: number): string {
-    if (id.length > length) {
-      return id.substring(0, length);
-    }
-    
-    if (id.length < length) {
-      return id.padEnd(length, this.generateRandomLetters(1));
-    }
-
+    this.usedIds.add(id);
     return id;
   }
 
   /**
-   * Configuração padrão
+   * Gera string aleatória com letras e números
    */
-  private getDefaultConfig(): IdGeneratorConfig {
-    return {
-      prefix: "USR",
-      pattern: "TTTRRNN",
-      length: 10,
-      checksum: false
-    };
-  }
+  private generateRandomString(length: number): string {
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let result = "";
 
-  /**
-   * Valida um ID gerado
-   */
-  public validate(id: string, role?: UserMainRole): boolean {
-    // Verifica formato básico
-    if (!id || id.length < 6) return false;
-
-    // Verifica prefixo se role for fornecido
-    if (role && ID_CONFIGS[role]) {
-      const expectedPrefix = ID_CONFIGS[role].prefix;
-      if (!id.startsWith(expectedPrefix)) return false;
-    }
-
-    // Verifica checksum se aplicável
-    if (id.includes('-')) {
-      const parts = id.split('-');
-      if (parts.length > 1) {
-        const body = parts.slice(0, -1).join('');
-        const providedChecksum = parts[parts.length - 1];
-        const calculatedChecksum = this.generateChecksum(body);
-        
-        if (providedChecksum !== calculatedChecksum) {
-          return false;
-        }
-      }
-    }
-
-    return true;
-  }
-
-  /**
-   * Decodifica informações do ID
-   */
-  public decode(id: string): {
-    role?: UserMainRole;
-    subRole?: EmployeeSubRole;
-    timestamp?: number;
-    isValid: boolean;
-  } {
-    const result: any = { isValid: this.validate(id) };
-
-    if (!result.isValid) return result;
-
-    // Detecta role pelo prefixo
-    for (const [role, config] of Object.entries(ID_CONFIGS)) {
-      if (id.startsWith(config.prefix)) {
-        result.role = role as UserMainRole;
-        
-        // Detecta sub-role
-        const prefix = config.prefix;
-        const remaining = id.substring(prefix.length);
-        
-        for (const [subRole, subPrefix] of Object.entries(SUBROLE_PREFIXES)) {
-          if (remaining.startsWith(subPrefix)) {
-            result.subRole = subRole as EmployeeSubRole;
-            break;
-          }
-        }
-        break;
-      }
+    for (let i = 0; i < length; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
     }
 
     return result;
   }
 
   /**
-   * Limpa IDs usados (útil para testes)
+   * Valida se o ID está no formato correto
+   */
+  public validate(id: string): boolean {
+    const pattern = /^URS[A-Z0-9]{6}-[0-9]{2}-[0-9]{4}\/[0-9]{2}\/[0-9]{2}$/;
+    return pattern.test(id);
+  }
+
+  /**
+   * Limpa IDs usados (para testes)
    */
   public clearUsedIds(): void {
     this.usedIds.clear();
   }
-
-  /**
-   * Estatísticas de uso
-   */
-  public getStats(): { totalGenerated: number; cacheSize: number } {
-    return {
-      totalGenerated: this.usedIds.size,
-      cacheSize: this.usedIds.size
-    };
-  }
 }
 
-// 🎯 FUNÇÃO DE CONVENIÊNCIA (backward compatibility)
-export default function generateCustomUserId(
-  role: UserMainRole, 
-  subRole?: EmployeeSubRole
-): string {
-  return UserIdGenerator.getInstance().generate(role, subRole);
+// 🎯 FUNÇÃO PRINCIPAL DE CONVENIÊNCIA
+export function generateUserId(): string {
+  return SimpleIdGenerator.getInstance().generate();
 }
 
-// 🎯 FUNÇÕES UTILITÁRIAS ADICIONAIS
-export function generateBatchUserIds(
-  role: UserMainRole, 
-  count: number, 
-  subRole?: EmployeeSubRole
-): string[] {
-  const generator = UserIdGenerator.getInstance();
+// 🎯 FUNÇÃO PARA GERAR VÁRIOS IDs
+export function generateBatchIds(count: number): string[] {
+  const generator = SimpleIdGenerator.getInstance();
   const ids: string[] = [];
 
   for (let i = 0; i < count; i++) {
-    ids.push(generator.generate(role, subRole));
+    ids.push(generator.generate());
   }
 
   return ids;
 }
 
-export function validateUserId(id: string, role?: UserMainRole): boolean {
-  return UserIdGenerator.getInstance().validate(id, role);
+// 🎯 FUNÇÃO DE VALIDAÇÃO
+export function validateId(id: string): boolean {
+  return SimpleIdGenerator.getInstance().validate(id);
 }
 
-export function decodeUserId(id: string) {
-  return UserIdGenerator.getInstance().decode(id);
-}
-
-// 🎯 EXEMPLOS DE USO:
-/*
-// 1. Uso básico
-const clientId = generateCustomUserId(UserMainRole.CLIENT);
-// "CLI-429XY5-29-A"
-
-const employeeId = generateCustomUserId(UserMainRole.EMPLOYEE, EmployeeSubRole.SALON_OWNER);
-// "EMPSO-384AB-38-B"
-
-// 2. Uso avançado
-const generator = UserIdGenerator.getInstance();
-const adminId = generator.generate(UserMainRole.ADMINSYSTEM, undefined, {
-  customPrefix: "SYS",
-  includeSubRole: false
-});
-// "SYS-529CD-52-C"
-
-// 3. Validação
-const isValid = validateUserId("CLI-429XY5-29-A", UserMainRole.CLIENT);
-// true
-
-// 4. Decodificação
-const info = decodeUserId("EMPSO-384AB-38-B");
-// { role: "employee", subRole: "salon_owner", isValid: true }
-
-// 5. Lote
-const batchIds = generateBatchUserIds(UserMainRole.CLIENT, 5);
-// ["CLI-529CD-52-A", "CLI-630DE-63-B", ...]
-*/
+// Exemplo de uso:
+// const id1 = generateUserId(); // "URS429XY5-14-2024/01/15"
+// const id2 = generateUserId(); // "URS8H3KL2-14-2024/01/15"

@@ -7,7 +7,8 @@ import { ClientController } from "../controllers/user/client/Client.controller";
 import { EmployeeController } from "../controllers/user/employee/Employee.controller";
 import { EmailVerificationController } from "../controllers/verificy/email/EmailVerification.controller";
 import { RegistrationCleanupController } from "../controllers/verificy/cleanup/RegistrationCleanup.controller";
-import { userDiagnostic } from "../utils/diagnostics/diagnostic.utils";
+// ✅ CORRETO - Novo
+import { authUserDiagnostic } from "../services/diagnostics/auth-service.diagnostic";
 import {
   authenticate,
   requireAdmin,
@@ -59,7 +60,7 @@ router.get(
   "/diagnostics/full",
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const diagnostic = await userDiagnostic.fullDiagnostic();
+      const diagnostic = await authUserDiagnostic.fullDiagnostic();
       res.json(diagnostic);
     } catch (error: any) {
       next(error);
@@ -71,7 +72,7 @@ router.get(
   "/diagnostics/quick",
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const diagnostic = await userDiagnostic.quickDiagnostic();
+      const diagnostic = await authUserDiagnostic.quickDiagnostic();
       res.json(diagnostic);
     } catch (error: any) {
       next(error);
@@ -197,12 +198,20 @@ router.post(
     cleanupController.bulkCleanup(req, res, next)
 );
 
-// ✅ CLEANUP STATS (SEM next - método sem parâmetros)
+// ✅ CORRIGIDO - CLEANUP STATS (COM next)
+// ✅ CORREÇÃO - Se o método não aceita parâmetros
 router.get(
   "/cleanup/stats",
   authenticate,
   requireAdmin,
-  (req: Request, res: Response) => cleanupController.getCleanupStats()
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const stats = cleanupController.getCleanupStats();
+      res.json(stats);
+    } catch (error: any) {
+      next(error);
+    }
+  }
 );
 
 // =============================================
@@ -729,7 +738,7 @@ router.get(
   "/internal/status",
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const quickDiagnostic = await userDiagnostic.quickDiagnostic();
+      const quickDiagnostic = await authUserDiagnostic.quickDiagnostic();
       res.json({
         service: "User Service Internal Status",
         status: "running",
